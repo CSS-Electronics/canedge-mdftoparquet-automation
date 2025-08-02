@@ -24,11 +24,13 @@ def run_container():
     """Main entry point for running in a container environment using environment variables"""
     # Get environment variables
     input_bucket = os.environ.get("INPUT_BUCKET")
-    
+
     if not input_bucket:
         logger.error("Missing required environment variable: INPUT_BUCKET")
         return 1
     
+    logger.info(f"Starting job with input container {input_bucket}")
+
     # Initialize Azure Blob Storage client
     try:
         connection_string = os.environ.get("StorageConnectionString", "")
@@ -70,10 +72,17 @@ def main():
     return run_container()
 
 if __name__ == "__main__":
+    logger.info("Starting MDF to Parquet backlog processing script")
     # Check if arguments were passed
     if len(sys.argv) > 1:
-        # If arguments were provided, use them
+        logger.info(f"Command line arguments detected: {sys.argv[1:]}")
+        logger.info("Entering command-line mode via main()")
         sys.exit(main())
     else:
-        # Otherwise, assume environment variables are set and just run the container entry point
+        logger.info("No command line arguments detected")
+        # Log the environment variables (without sensitive data)
+        input_bucket = os.environ.get("INPUT_BUCKET", "[NOT SET]")
+        has_connection = "[SET]" if os.environ.get("StorageConnectionString") else "[NOT SET]"
+        logger.info(f"Environment variables: INPUT_BUCKET={input_bucket}, StorageConnectionString={has_connection}")
+        logger.info("Entering container mode via run_container()")
         sys.exit(run_container())

@@ -34,13 +34,6 @@ Contains utilities and scripts for local development and testing.
 - `run_test.py` - Main test runner for simulating cloud function invocation locally
 - `local_invocation.py` - Utility for invoking cloud functions with proper environment setup
 - `utils_testing.py` - Utility functions for creating test events and loading credentials
-- Test batch files:
-  - `test_amazon_single.bat` - Test AWS Lambda function with a single file
-  - `test_azure_single.bat` - Test Azure function with a single file
-  - `test_google_single.bat` - Test Google function with a single file
-  - `test_amazon_backlog.bat` - Test AWS backlog processing
-  - `test_azure_backlog.bat` - Test Azure backlog processing
-  - `test_google_backlog.bat` - Test Google backlog processing
 
 ### Core Modules
 Shared functionality is in the `modules/` directory at the repository root:
@@ -152,20 +145,6 @@ Use these batch files to test batch processing with a backlog.json file:
 .\test_google_backlog.bat  # Test Google Cloud Storage backlog processing
 .\test_backlog_local.bat   # Test local backlog processing
 ```
-
-### Advanced Testing
-
-You can also run the `run_test.py` script directly with more options:
-
-```
-python run_test.py --cloud [Amazon|Google|Azure|Local] [options]
-```
-
-Available options:
-- `--cloud` or `-c`: Cloud provider (Amazon, Azure, Google, or Local)
-- `--object-path` or `-o`: Path to the object in cloud storage
-- `--input-bucket` or `-i`: Input bucket/container name
-- `--backlog` or `-b`: Enable backlog processing instead of single file
 
 ### Under the Hood
 
