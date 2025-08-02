@@ -1,0 +1,18 @@
+[
+  {
+    "messages_filtered_list": "CAN1_DM01_DTC_",
+    "messages_match_type": "contains",
+    "raster": "",
+    "custom_message_name": "CAN1_CALC_DM01",
+    "prefix": false,
+    "function": "combine_dtcs"
+  },
+  {
+    "messages_filtered_list": "CAN2_DM01_DTC_",
+    "messages_match_type": "contains",
+    "raster": "",
+    "custom_message_name": "CAN2_CALC_DM01",
+    "prefix": false,
+    "function": "combine_dtcs"
+  }
+]

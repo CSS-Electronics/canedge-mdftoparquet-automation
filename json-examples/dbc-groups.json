@@ -1,0 +1,24 @@
+{
+  "dbc_groups": [
+    {
+      "devices": [
+        "2A896980",
+        "2F6913DB",
+        "18D508A1"
+      ],
+      "dbc_files": [
+        "can1-typeA.dbc",
+        "can2-mydbc2.dbc"
+      ]
+    },
+    {
+      "devices": [
+        "12345678"
+      ],
+      "dbc_files": [
+        "can1-typeB.dbc",
+        "can2-mydbc2.dbc"
+      ]
+    }
+  ]
+}

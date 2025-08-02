@@ -1,0 +1,4 @@
+local-testing/creds/*
+*.zip
+*pycache*
+*local-input-bucket-parquet*

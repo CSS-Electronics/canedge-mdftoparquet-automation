@@ -1,0 +1,33 @@
+{
+   "general": {
+      "include_gps_data": true,
+      "signal_latitude": "Latitude",
+      "signal_longitude": "Longitude",
+      "messages_gps": ["CAN9_GnssPos"],
+      "static_body_content": "Review details via <a href='<dashboard-url>'>your event dashboard</a>"
+   },
+   "events": [
+      {
+         "event_name":"HighSpeedAlert",
+		 "messages_match_type": "equals",
+         "messages_filtered_list":[["CAN9_GnssSpeed"]],
+         "trigger_signals":["Speed"],
+         "lower_threshold":5,
+         "upper_threshold":10,
+         "rising_as_start":true,
+         "exact_match":false,
+         "raster":"0.2s"
+      },
+	  {
+        "event_name":"DM01_DTC_01_Active",
+		"messages_match_type": "contains",
+		"messages_filtered_list": "_DM01_DTC_01",
+		"trigger_signals": ["DM01_OC"],
+		"lower_threshold": 0,
+		"upper_threshold": 1,
+		"rising_as_start": true,
+		"exact_match": false,
+		"raster" : "1s" 
+      }
+   ]
+}
