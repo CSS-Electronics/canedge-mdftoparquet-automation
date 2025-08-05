@@ -118,35 +118,41 @@ echo Google Backlog Processing zip created: %OUTPUT_DIR%\%GOOGLE_ZIP_NAME%
 echo.
 
 :: ==========================================
-:: Build Azure Backlog Processing container directory
+:: Build Multi-Cloud Backlog Processing container directory
 :: ==========================================
-echo Building Azure Backlog Processing container directory...
-set "AZURE_CONTAINER_DIR=%OUTPUT_DIR%\backlog-processor-azure-container"
+echo Building Multi-Cloud Backlog Processing container directory...
+set "MULTICLOUD_CONTAINER_DIR=%OUTPUT_DIR%\backlog-processor-container"
 
-:: Create the container directory structure
-if exist "%AZURE_CONTAINER_DIR%" rd /s /q "%AZURE_CONTAINER_DIR%"
-mkdir "%AZURE_CONTAINER_DIR%"
-mkdir "%AZURE_CONTAINER_DIR%\modules"
+:: Create the container directory structure if it doesn't exist
+if not exist "%MULTICLOUD_CONTAINER_DIR%" mkdir "%MULTICLOUD_CONTAINER_DIR%"
 
-:: Copy azure-container-root contents to the container directory
-if exist "azure-container-root" (
-    xcopy /E /I /Y "azure-container-root\*" "%AZURE_CONTAINER_DIR%\"
-)
+:: Copy requirements file
+echo Copying requirements file...
+copy "container-root\requirements.txt" "%MULTICLOUD_CONTAINER_DIR%\"
 
-:: Copy files for Azure Backlog Processing
-copy process_backlog_azure.py "%AZURE_CONTAINER_DIR%\"
-copy "%REPO_ROOT%\mdf2parquet_decode" "%AZURE_CONTAINER_DIR%\"
+:: Copy Dockerfile
+echo Copying Dockerfile...
+copy "container-root\Dockerfile" "%MULTICLOUD_CONTAINER_DIR%\"
 
-:: Copy modules excluding __pycache__ folders
+:: Copy decoder executable
+echo Copying decoder executable...
+copy "%REPO_ROOT%\mdf2parquet_decode" "%MULTICLOUD_CONTAINER_DIR%\"
+
+:: Copy script files
+echo Copying main script...
+copy "process_backlog_container.py" "%MULTICLOUD_CONTAINER_DIR%\"
+
+:: Copy modules directory recursively
+echo Copying modules directory...
 for /D %%d in ("%REPO_ROOT%\modules\*") do (
     set "folder=%%~nxd"
     if /I not "!folder!"=="__pycache__" (
-        xcopy /E /I /Y "%REPO_ROOT%\modules\!folder!" "%AZURE_CONTAINER_DIR%\modules\!folder!"
+        xcopy /E /I /Y "%REPO_ROOT%\modules\!folder!" "%MULTICLOUD_CONTAINER_DIR%\modules\!folder!"
     )
 )
-xcopy /Y "%REPO_ROOT%\modules\*.py" "%AZURE_CONTAINER_DIR%\modules\"
+xcopy /Y "%REPO_ROOT%\modules\*.py" "%MULTICLOUD_CONTAINER_DIR%\modules\"
 
-echo Azure Backlog Processing container directory created: %AZURE_CONTAINER_DIR%
+echo Multi-Cloud Backlog Processing container directory created: %MULTICLOUD_CONTAINER_DIR%
 echo.
 
 :: ==========================================

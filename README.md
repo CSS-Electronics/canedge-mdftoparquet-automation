@@ -24,7 +24,7 @@ Contains the cloud function code for processing individual MDF files when they a
 Contains scripts for batch processing existing MDF files in cloud storage buckets.
 
 - `process_backlog_amazon.py` - Script for processing backlog files in AWS S3
-- `process_backlog_azure.py` - Script for processing backlog files in Azure Blob Storage
+- `process_backlog_container.py` - Script for processing backlog files in Azure Blob Storage via container
 - `process_backlog_google.py` - Script for processing backlog files in Google Cloud Storage
 
 ### 3. `local-testing/` - Local Testing Environment
@@ -258,76 +258,9 @@ Each ZIP file contains:
 
 ### Deployment to Cloud Platforms
 
-#### Amazon AWS Lambda
+For details on deploying the cloud functions, see the CANedge Intro.
 
-1. Upload the Amazon ZIP file to your AWS Lambda function:
-   - AWS Console > Lambda > Functions > Your Function > Code > Upload from > .zip file
-   - Select the generated ZIP file from the `release/` directory
-
-2. Configure environment variables:
-   - `INPUT_BUCKET` - S3 bucket containing MDF files
-   - Make sure the execution role has permissions to read from the input bucket and write to the output bucket
-
-3. Set up an S3 trigger for new object creation events:
-   - Add trigger > S3 > Select your input bucket > Event type: All object create events
-
-#### Google Cloud Functions
-
-1. Deploy the Google ZIP file to Google Cloud Functions:
-   - Google Cloud Console > Cloud Functions > Create Function
-   - Runtime: Python 3.9+
-   - Entry point: `process_mdf_file`
-   - Upload the generated ZIP file from the `release/` directory
-
-2. Configure environment variables:
-   - `INPUT_BUCKET` - GCS bucket containing MDF files
-   - Make sure the service account has permissions to read/write to the appropriate buckets
-
-3. Set up a Cloud Storage trigger:
-   - Trigger type: Cloud Storage
-   - Event type: Finalize/Create
-   - Bucket: Your input bucket
-
-#### Azure Functions
-
-1. Deploy the Azure ZIP file to Azure Functions:
-   - Azure Portal > Function Apps > Your Function App > Functions
-   - Deploy the generated ZIP file using Azure Functions Core Tools or VS Code
-
-2. Configure application settings:
-   - `INPUT_BUCKET` - Azure Storage container containing MDF files
-   - Configure storage connection strings in Application Settings
-
-3. Set up a Blob Storage trigger:
-   - Binding type: Blob Storage trigger
-   - Path: your-container/{name}
-
-### Backlog Processing
-
-For processing existing files in bulk:
-
-1. Create a `backlog.json` file with an array of file paths to process
-2. Upload this file to the root of your input bucket
-3. Use the appropriate backlog processing script for your cloud provider:
-   - AWS: Use the `process_backlog_amazon.py` script
-   - Azure: Use the `process_backlog_azure.py` script
-   - Google: Use the `process_backlog_google.py` script
-
-## Parquet File Validation
-
-To validate the generated Parquet files, you can use the provided `validate_parquet_files.py` script:
-
-```
-python validate_parquet_files.py <directory_path>
-```
-
-This utility will:
-1. Recursively scan for all Parquet files (*.parquet, *.pq) in the specified directory
-2. Attempt to load each file using PyArrow to verify its validity
-3. Report any invalid Parquet files along with detailed error messages
-4. Provide a summary of valid and invalid files
-
-## How It Works
+### How It Works
 
 1. **Trigger**: A new MDF file (`.MF4`, `.MFC`, `.MFE`, or `.MFM`) is uploaded to the input bucket/container
 2. **Processing**:
@@ -341,7 +274,7 @@ This utility will:
    - Files are uploaded to the output bucket/container (named with `-parquet` suffix)
    - For events, notifications may be sent (e.g., via SNS in AWS)
 
-## Additional Configuration
+### Additional Configuration
 
 - **Custom Messages**: Define custom calculated signals by uploading a `custom-messages.json` file to the input bucket
 - **Event Detection**: Configure event detection by uploading an `events.json` file to the input bucket
@@ -356,7 +289,7 @@ This utility will:
 
 ## Using Backlog Files
 
-For batch processing of multiple files, you can use a `backlog.json` file. This allows processing existing files in the storage bucket without re-uploading them.
+For batch processing of multiple files, you can use a `backlog.json` file. This allows processing existing files in the storage bucket without re-uploading them. Depending on your cloud, you can trigger the backlog processing script in different ways (see the CANedge Intro).
 
 ### Backlog File Structure
 
@@ -383,7 +316,7 @@ You can specify three types of entries in the backlog file:
 
 **Note**: For prefixes (device or session), trailing slashes are optional - they will be automatically added if missing. File paths should not have trailing slashes.
 
-### Running with a Backlog File
+### Local Testing with a Backlog File
 
 To process a backlog file:
 

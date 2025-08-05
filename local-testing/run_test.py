@@ -60,6 +60,11 @@ def setup_environment(cloud, input_bucket, decoder_path=None):
     if not input_bucket:
         logger.error("No input bucket specified. This is required.")
         return None
+        
+    # For Azure specifically, rename the connection string env var to match what container script expects
+    if cloud == "Azure" and os.environ.get("AZURE_STORAGE_CONNECTION_STRING"):
+        os.environ["StorageConnectionString"] = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+        logger.info("Azure storage connection string mapped to StorageConnectionString")
     
     # Set output bucket based on input bucket if not already in environment
     output_bucket = os.environ.get('OUTPUT_BUCKET')
@@ -148,7 +153,15 @@ def process_backlog(cloud, input_bucket):
         bool: True if the backlog processing executed successfully, False otherwise
     """
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    backlog_script_path = os.path.join(repo_root, "mdftoparquet-backlog", f"process_backlog_{cloud.lower()}.py")
+    
+    # For Azure, use the container script (process_backlog_container.py)
+    if cloud == "Azure":
+        backlog_script_path = os.path.join(repo_root, "mdftoparquet-backlog", "process_backlog_container.py")
+        # Set the CLOUD environment variable for the container script
+        os.environ["CLOUD"] = "Azure"
+    else:
+        # For other cloud providers, use their specific scripts
+        backlog_script_path = os.path.join(repo_root, "mdftoparquet-backlog", f"process_backlog_{cloud.lower()}.py")
     
     logger.info(f"Processing backlog using {backlog_script_path}")
     
