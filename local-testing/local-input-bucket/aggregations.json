@@ -1,0 +1,54 @@
+{
+  "device_clusters": [
+    {
+      "devices": [
+        "2A896980",
+        "2F6913DB",
+        "18D508A1"
+      ],
+      "cluster": "cluster1"
+    }
+  ],
+  "cluster_details": [
+    {
+	  "clusters": ["cluster1"],
+      "details": {
+        "trip_identifier": {
+          "message": "CAN2_GnssSpeed"
+        },
+        "aggregations": [
+          {
+            "message": "CAN2_GnssSpeed",
+            "signal": [
+              "Speed"
+            ],
+            "aggregation": ["avg", "max"]
+          },
+          {
+            "message": "CAN2_GnssAltitude",
+            "signal": [
+              "Altitude"
+            ],
+            "aggregation": ["max"]
+          },
+          {
+            "message": "CAN2_GnssPosition",
+            "signal": [
+              "Latitude",
+              "Longitude"
+            ],
+            "aggregation": ["first"]
+          },
+          {
+            "message": "CAN2_GnssOdo",
+            "signal": [
+              "DistanceTrip"
+            ],
+            "aggregation": ["delta_sum"]
+          }
+		  
+        ]
+      }
+    }
+  ]
+}

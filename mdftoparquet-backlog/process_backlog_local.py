@@ -60,9 +60,6 @@ def main():
     # No storage client needed for local processing
     process_backlog = ProcessBacklog("Local", None, input_folder, logger)
     
-    # Add DBC files to valid extensions
-    process_backlog.valid_extensions.append(".DBC")
-    
     # Process the backlog
     logger.info(f"Processing backlog from {input_folder}")
     result = process_backlog.process_backlog_from_cloud()
