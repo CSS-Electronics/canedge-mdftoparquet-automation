@@ -1,6 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Enable error handling
+set "ERROR_OCCURRED=0"
+
 echo Starting backlog processing deployment preparation...
 echo.
 
@@ -28,8 +31,8 @@ set "REPO_ROOT=.."
 set "OUTPUT_DIR=%REPO_ROOT%\release"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-:: Read versions from the config file
-set "VERSION_FILE=backlog-versions.cfg"
+:: Read versions from the root config file
+set "VERSION_FILE=%REPO_ROOT%\versions.cfg"
 if not exist "%VERSION_FILE%" (
     echo Error: %VERSION_FILE% not found.
     exit /b 1
@@ -66,9 +69,22 @@ mkdir "%TEMP_DIR%"
 :: ==========================================
 echo Creating versioned Amazon Backlog Processing entry script...
 
+:: Check if the required entry script exists
+if not exist "process_backlog_amazon_entry.py" (
+    echo ERROR: Required file process_backlog_amazon_entry.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
 :: Create versioned entry script in output directory
 set "AMAZON_ENTRY_SCRIPT=process_backlog_amazon_entry-v%AMAZON_VERSION%.py"
 copy process_backlog_amazon_entry.py "%OUTPUT_DIR%\%AMAZON_ENTRY_SCRIPT%"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy Amazon entry script!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
 echo Amazon Backlog Processing entry script created: %OUTPUT_DIR%\%AMAZON_ENTRY_SCRIPT%
 echo.
 
@@ -80,10 +96,39 @@ set "GOOGLE_BUILD_DIR=%TEMP_DIR%\google-backlog"
 mkdir "%GOOGLE_BUILD_DIR%"
 mkdir "%GOOGLE_BUILD_DIR%\modules"
 
-:: Copy files for Google Backlog Processing
+:: Check for required files
+echo Checking required files for Google Backlog Processing...
+
+:: Check for process_backlog_google.py
+if not exist process_backlog_google.py (
+    echo ERROR: Required file process_backlog_google.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for decoder executable
+if not exist "%REPO_ROOT%\mdf2parquet_decode" (
+    echo ERROR: Required file mdf2parquet_decode not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy files for Google Backlog Processing after all checks have passed
+echo Copying Google Backlog Processing files...
 :: Rename process_backlog_google.py to main.py for Google Cloud Function requirements
 copy process_backlog_google.py "%GOOGLE_BUILD_DIR%\main.py"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy process_backlog_google.py!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
 copy "%REPO_ROOT%\mdf2parquet_decode" "%GOOGLE_BUILD_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy mdf2parquet_decode!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
 
 :: Copy Google function root content if it exists
 if exist "%REPO_ROOT%\mdftoparquet\google-function-root" (
@@ -126,21 +171,72 @@ set "MULTICLOUD_CONTAINER_DIR=%OUTPUT_DIR%\backlog-processor-container"
 :: Create the container directory structure if it doesn't exist
 if not exist "%MULTICLOUD_CONTAINER_DIR%" mkdir "%MULTICLOUD_CONTAINER_DIR%"
 
-:: Copy requirements file
+:: Check for required container files
+echo Checking required files for Multi-Cloud container...
+
+:: Check for requirements file
+if not exist "container-root\requirements.txt" (
+    echo ERROR: Required file container-root\requirements.txt not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for Dockerfile
+if not exist "container-root\Dockerfile" (
+    echo ERROR: Required file container-root\Dockerfile not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for decoder executable
+if not exist "%REPO_ROOT%\mdf2parquet_decode" (
+    echo ERROR: Required file mdf2parquet_decode not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for main script
+if not exist "process_backlog_container.py" (
+    echo ERROR: Required file process_backlog_container.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy requirements file after all checks passed
 echo Copying requirements file...
 copy "container-root\requirements.txt" "%MULTICLOUD_CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy requirements.txt!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
 
 :: Copy Dockerfile
 echo Copying Dockerfile...
 copy "container-root\Dockerfile" "%MULTICLOUD_CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy Dockerfile!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
 
 :: Copy decoder executable
 echo Copying decoder executable...
 copy "%REPO_ROOT%\mdf2parquet_decode" "%MULTICLOUD_CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy mdf2parquet_decode!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
 
 :: Copy script files
 echo Copying main script...
 copy "process_backlog_container.py" "%MULTICLOUD_CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy process_backlog_container.py!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
 
 :: Copy modules directory recursively
 echo Copying modules directory...

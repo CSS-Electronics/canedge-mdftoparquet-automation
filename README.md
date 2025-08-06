@@ -230,6 +230,107 @@ python local-testing/run_test.py \
 
 The backlog feature expects a `backlog.json` file in the root of the input bucket or folder, containing a list of MDF files to process.
 
+## Aggregation Processing
+
+The repository includes functionality for aggregating Parquet data into trip summaries across all cloud providers:
+
+- `aggregation/process_aggregation_amazon.py`
+- `aggregation/process_aggregation_azure.py` 
+- `aggregation/process_aggregation_google.py`
+- `aggregation/process_aggregation_container.py` (multi-cloud container version)
+- `aggregation/process_aggregation_local.py` (local testing version)
+
+These scripts read an `aggregations.json` file from the root of the input bucket, which defines how Parquet data should be aggregated into trips.
+
+### Aggregation Configuration Structure
+
+The aggregations.json file defines how to identify and process trips in the Parquet data:
+
+```json
+{
+  "config": {
+    "date": {
+      "mode": "specific_period",
+      "start_date": "2023-01-01",
+      "end_date": "2023-12-31"
+    },
+    "trip": {
+      "trip_gap_min": 10,
+      "trip_min_length_min": 1
+    }
+  },
+  "device_clusters": [
+    {
+      "devices": ["2F6913DB", "ABCDEF12"],
+      "cluster": "cluster1"
+    }
+  ],
+  "cluster_details": [
+    {
+      "clusters": ["cluster1"],
+      "details": {
+        "trip_identifier": {
+          "message": "CAN2_GnssSpeed"
+        },
+        "aggregations": [
+          {
+            "message": "CAN2_GnssSpeed",
+            "signal": ["Speed"],
+            "aggregation": ["avg", "max"]
+          },
+          {
+            "message": "CAN2_GnssPosition",
+            "signal": ["Latitude", "Longitude"],
+            "aggregation": ["first", "last"]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+- **config**: Top-level configuration section
+  - **date**: Date range configuration
+    - **mode**: Either "specific_period" (use explicit dates) or "previous_day" (automatic)
+    - **start_date/end_date**: Required for "specific_period" mode (format: YYYY-MM-DD)
+  - **trip**: Trip detection parameters
+    - **trip_gap_min**: Minutes of inactivity to consider a new trip has started
+    - **trip_min_length_min**: Minimum trip length in minutes to be considered valid
+
+- **device_clusters**: Group devices into logical clusters
+  - **devices**: List of device IDs (serial numbers) to process
+  - **cluster**: Name assigned to this group of devices
+
+- **cluster_details**: Processing configuration for each cluster
+  - **clusters**: List of cluster names to apply these settings to
+  - **details**: Processing configuration
+    - **trip_identifier**: Message used to identify trips
+    - **aggregations**: List of signals to aggregate
+      - **message**: Message name from DBC file
+      - **signal**: List of signal names to aggregate
+      - **aggregation**: List of aggregation functions (avg, max, min, sum, first, last, etc.)
+
+### Testing Aggregation Processing
+
+To test aggregation processing locally:
+
+```bash
+python local-testing/run_test.py \
+  --cloud <Amazon|Google|Azure|Local> \
+  --input-bucket <bucket-name-or-folder> \
+  --aggregate
+```
+
+Or use the provided test batch files:
+
+```
+.\test_amazon_aggregation.bat
+.\test_azure_aggregation.bat
+.\test_google_aggregation.bat
+.\test_local_aggregation.bat
+```
+
 ## Deployment
 
 ### Preparing Deployment Packages

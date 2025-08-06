@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-# Multi-Cloud Backlog Processing Script
+# Multi-Cloud Aggregation Script
 # 
-# This script processes a backlog.json file from cloud storage to convert MDF files to Parquet format.
-# The backlog.json should be located in the root of the input container/bucket.
-
-
+# This script processes an aggregations.json file from an input bucket to aggregate Parquet data to trip summary level.
+#
 import os
 import sys
 import logging
-from modules.utils import ProcessBacklog
+from modules.aggregation import AggregateData
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
 
 def run_container():
     input_bucket = os.environ.get("INPUT_BUCKET")
+    output_bucket = input_bucket + "-parquet"
     cloud = os.environ.get("CLOUD")
 
     logger.info(f"Starting job with input {input_bucket} on {cloud} cloud")
@@ -39,9 +38,15 @@ def run_container():
             logger.error(f"Unsupported cloud provider: {cloud}. Supported options: Azure, Amazon, Google")
             return 1
         
-        pb = ProcessBacklog(cloud, storage_client, input_bucket, logger)
-        success = pb.process_backlog_from_cloud()
-        return 0 if success else 1
+        aggregator = AggregateData(
+            cloud=cloud,
+            client=storage_client,
+            input_bucket=input_bucket,
+            output_bucket=output_bucket,
+            logger=logger
+        )        
+        aggregator.process_data_lake()
+        return 0
             
     except Exception as e:
         logger.error(f"Unexpected error: {e}")

@@ -1,7 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo Starting backlog processing deployment preparation...
+:: Enable error handling
+set "ERROR_OCCURRED=0"
+
+echo Starting aggregation deployment preparation...
 echo.
 
 :: Check if 7-Zip is installed
@@ -28,8 +31,8 @@ set "REPO_ROOT=.."
 set "OUTPUT_DIR=%REPO_ROOT%\release"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-:: Read versions from the config file
-set "VERSION_FILE=backlog-versions.cfg"
+:: Read versions from the root config file
+set "VERSION_FILE=%REPO_ROOT%\versions.cfg"
 if not exist "%VERSION_FILE%" (
     echo Error: %VERSION_FILE% not found.
     exit /b 1
@@ -62,135 +65,117 @@ if exist "%TEMP_DIR%" rd /s /q "%TEMP_DIR%"
 mkdir "%TEMP_DIR%"
 
 :: ==========================================
-:: Create versioned Amazon Backlog Processing entry script
+:: Create versioned Amazon Aggregation entry script
 :: ==========================================
-echo Creating versioned Amazon Backlog Processing entry script...
+echo Creating versioned Amazon Aggregation entry script...
 
 :: Create versioned entry script in output directory
-set "AMAZON_ENTRY_SCRIPT=process_backlog_amazon_entry-v%AMAZON_VERSION%.py"
-copy process_backlog_amazon_entry.py "%OUTPUT_DIR%\%AMAZON_ENTRY_SCRIPT%"
-echo Amazon Backlog Processing entry script created: %OUTPUT_DIR%\%AMAZON_ENTRY_SCRIPT%
+set "AMAZON_ENTRY_SCRIPT=process_aggregation_amazon_entry-v%AMAZON_VERSION%.py"
+copy process_aggregation_amazon_entry.py "%OUTPUT_DIR%\%AMAZON_ENTRY_SCRIPT%"
+echo Amazon Aggregation entry script created: %OUTPUT_DIR%\%AMAZON_ENTRY_SCRIPT%
 echo.
 
 :: ==========================================
-:: Build Google Backlog Processing zip
+:: Build Google Aggregation zip
 :: ==========================================
-echo Building Google Backlog Processing zip file...
-set "GOOGLE_BUILD_DIR=%TEMP_DIR%\google-backlog"
+echo Building Google Aggregation zip file...
+set "GOOGLE_BUILD_DIR=%TEMP_DIR%\google-aggregation"
 mkdir "%GOOGLE_BUILD_DIR%"
 mkdir "%GOOGLE_BUILD_DIR%\modules"
 
-:: Copy files for Google Backlog Processing
-:: Rename process_backlog_google.py to main.py for Google Cloud Function requirements
-copy process_backlog_google.py "%GOOGLE_BUILD_DIR%\main.py"
-copy "%REPO_ROOT%\mdf2parquet_decode" "%GOOGLE_BUILD_DIR%\"
+:: Copy files for Google Aggregation
+copy process_aggregation_google.py "%GOOGLE_BUILD_DIR%\"
 
-:: Copy Google function root content if it exists
-if exist "%REPO_ROOT%\mdftoparquet\google-function-root" (
-    for /f %%f in ('dir /b "%REPO_ROOT%\mdftoparquet\google-function-root"') do (
-        if "%%f" NEQ ".gitignore" (
-            if exist "%REPO_ROOT%\mdftoparquet\google-function-root\%%f" (
-                if exist "%REPO_ROOT%\mdftoparquet\google-function-root\%%f\" (
-                    xcopy /E /I /Y "%REPO_ROOT%\mdftoparquet\google-function-root\%%f" "%GOOGLE_BUILD_DIR%\%%f"
-                ) else (
-                    copy "%REPO_ROOT%\mdftoparquet\google-function-root\%%f" "%GOOGLE_BUILD_DIR%\"
-                )
-            )
-        )
-    )
-)
+:: Copy modules
+xcopy /E /I /Y "%REPO_ROOT%\modules" "%GOOGLE_BUILD_DIR%\modules"
 
-:: Copy modules excluding __pycache__ folders
-for /D %%d in ("%REPO_ROOT%\modules\*") do (
-    set "folder=%%~nxd"
-    if /I not "!folder!"=="__pycache__" (
-        xcopy /E /I /Y "%REPO_ROOT%\modules\!folder!" "%GOOGLE_BUILD_DIR%\modules\!folder!"
-    )
-)
-xcopy /Y "%REPO_ROOT%\modules\*.py" "%GOOGLE_BUILD_DIR%\modules\"
+:: Create zip archive
+set "GOOGLE_ZIP=process-aggregation-google-v%GOOGLE_VERSION%.zip"
+cd "%TEMP_DIR%"
+"%SEVENZIP_PATH%" a -r "%REPO_ROOT%\release\%GOOGLE_ZIP%" "google-aggregation\*"
+cd "%~dp0"
 
-:: Create the zip file
-set "GOOGLE_ZIP_NAME=backlog-processor-google-v%GOOGLE_VERSION%.zip"
-cd "%GOOGLE_BUILD_DIR%"
-"%SEVENZIP_PATH%" a -tzip -mx=5 "..\..\%OUTPUT_DIR%\%GOOGLE_ZIP_NAME%" *
-cd ..\..\
-echo Google Backlog Processing zip created: %OUTPUT_DIR%\%GOOGLE_ZIP_NAME%
+echo Google Aggregation zip created: %OUTPUT_DIR%\%GOOGLE_ZIP%
 echo.
 
 :: ==========================================
-:: Build Multi-Cloud Backlog Processing container directory
+:: Create container deployment
 :: ==========================================
-echo Building Multi-Cloud Backlog Processing container directory...
-set "MULTICLOUD_CONTAINER_DIR=%OUTPUT_DIR%\backlog-processor-container"
+echo Creating container deployment files...
 
-:: Create the container directory structure if it doesn't exist
-if not exist "%MULTICLOUD_CONTAINER_DIR%" mkdir "%MULTICLOUD_CONTAINER_DIR%"
+:: Create directory for container files
+set "CONTAINER_DIR=%OUTPUT_DIR%\aggregation-processor-container"
+if exist "%CONTAINER_DIR%" rd /s /q "%CONTAINER_DIR%"
+mkdir "%CONTAINER_DIR%"
 
-:: Copy requirements file
-echo Copying requirements file...
-copy "container-root\requirements.txt" "%MULTICLOUD_CONTAINER_DIR%\"
+:: Check required files for container deployment
+echo Checking required files for aggregation container...
 
-:: Copy Dockerfile
-echo Copying Dockerfile...
-copy "container-root\Dockerfile" "%MULTICLOUD_CONTAINER_DIR%\"
-
-:: Copy decoder executable
-echo Copying decoder executable...
-copy "%REPO_ROOT%\mdf2parquet_decode" "%MULTICLOUD_CONTAINER_DIR%\"
-
-:: Copy script files
-echo Copying main script...
-copy "process_backlog_container.py" "%MULTICLOUD_CONTAINER_DIR%\"
-
-:: Copy modules directory recursively
-echo Copying modules directory...
-for /D %%d in ("%REPO_ROOT%\modules\*") do (
-    set "folder=%%~nxd"
-    if /I not "!folder!"=="__pycache__" (
-        xcopy /E /I /Y "%REPO_ROOT%\modules\!folder!" "%MULTICLOUD_CONTAINER_DIR%\modules\!folder!"
-    )
+:: Check for Dockerfile
+if not exist "container-root\Dockerfile" (
+    echo ERROR: Required file container-root\Dockerfile not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
 )
-xcopy /Y "%REPO_ROOT%\modules\*.py" "%MULTICLOUD_CONTAINER_DIR%\modules\"
 
-echo Multi-Cloud Backlog Processing container directory created: %MULTICLOUD_CONTAINER_DIR%
-echo.
-
-:: ==========================================
-:: Build Local Backlog Processing zip
-:: ==========================================
-echo Building Local Backlog Processing zip file...
-set "LOCAL_BUILD_DIR=%TEMP_DIR%\local-backlog"
-mkdir "%LOCAL_BUILD_DIR%"
-mkdir "%LOCAL_BUILD_DIR%\modules"
-
-:: Copy files for Local Backlog Processing
-copy process_backlog_local.py "%LOCAL_BUILD_DIR%\"
-copy "%REPO_ROOT%\mdf2parquet_decode" "%LOCAL_BUILD_DIR%\"
-:: Copy Windows decoder executable if it exists
-if exist "%REPO_ROOT%\local-testing\mdf4decoder.exe" (
-    copy "%REPO_ROOT%\local-testing\mdf4decoder.exe" "%LOCAL_BUILD_DIR%\"
+:: Check for requirements file
+if not exist "container-root\requirements.txt" (
+    echo ERROR: Required file container-root\requirements.txt not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
 )
+
+:: Check for container script
+if not exist "process_aggregation_container.py" (
+    echo ERROR: Required file process_aggregation_container.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy files for container deployment after all checks passed
+echo Copying container deployment files...
+copy container-root\Dockerfile "%CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy Dockerfile!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+copy container-root\requirements.txt "%CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy requirements.txt!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+copy process_aggregation_container.py "%CONTAINER_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy process_aggregation_container.py!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Create modules directory
+mkdir "%CONTAINER_DIR%\modules"
 
 :: Copy modules excluding __pycache__ folders
+echo Copying modules excluding __pycache__ folders...
 for /D %%d in ("%REPO_ROOT%\modules\*") do (
     set "folder=%%~nxd"
     if /I not "!folder!"=="__pycache__" (
-        xcopy /E /I /Y "%REPO_ROOT%\modules\!folder!" "%LOCAL_BUILD_DIR%\modules\!folder!"
+        xcopy /E /I /Y "%REPO_ROOT%\modules\!folder!" "%CONTAINER_DIR%\modules\!folder!"
     )
 )
-xcopy /Y "%REPO_ROOT%\modules\*.py" "%LOCAL_BUILD_DIR%\modules\"
 
-:: Create the zip file
-set "LOCAL_ZIP_NAME=backlog-processor-local-v%LOCAL_VERSION%.zip"
-cd "%LOCAL_BUILD_DIR%"
-"%SEVENZIP_PATH%" a -tzip -mx=5 "..\..\%OUTPUT_DIR%\%LOCAL_ZIP_NAME%" *
-cd ..\..\
-echo Local Backlog Processing zip created: %OUTPUT_DIR%\%LOCAL_ZIP_NAME%
+:: Copy module root Python files
+xcopy /Y "%REPO_ROOT%\modules\*.py" "%CONTAINER_DIR%\modules\"
+
+echo Container deployment files created in: %CONTAINER_DIR%
 echo.
 
 :: Clean up temporary directory
 echo Cleaning up temporary files...
 rd /s /q "%TEMP_DIR%"
 
-echo All backlog processing zip files created successfully in the "%OUTPUT_DIR%" directory.
+echo All aggregation deployment files created successfully in the "%OUTPUT_DIR%" directory.
 echo.
