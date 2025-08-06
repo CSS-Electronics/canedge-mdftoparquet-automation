@@ -222,36 +222,17 @@ class AggregateData:
         df
     ):
        
-        start_time, end_time = trip_window
-        
-        # Determine which time column is present (t or TimeStamp)
-        time_col = None
-        if 't' in df.columns:
-            time_col = 't'
-        elif 'TimeStamp' in df.columns:
-            time_col = 'TimeStamp'
-        else:
-            self.logger.warning(f"No timestamp column (t or TimeStamp) found in data for {message}")
-            return []
-            
-        # Filter DataFrame for the trip window
-        trip_df = df[(df[time_col] >= start_time) & (df[time_col] <= end_time)]
-        
-        if len(trip_df) == 0:
-            return []
-            
-        # Format timestamps
-        start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
-        end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
-        
-        self.logger.info(f"---- Processing trip from {start_str} to {end_str} for device {device_id}, message {message}")
-        
-        # Calculate aggregations
+        df = df[(df["t"] >= trip_window[0]) & (df["t"] <= trip_window[1])]
         results = []
-        
+        if df.empty:
+            return results
+
+        start_str = trip_window[0].strftime("%Y-%m-%d %H:%M:%S")
+        end_str = trip_window[1].strftime("%Y-%m-%d %H:%M:%S")
+        self.logger.info(f"---- Processing trip from {start_str} to {end_str} for device {device_id}, message {message}")
+  
         for signal in signals:
-            if signal not in trip_df.columns:
-                self.logger.warning(f"Signal {signal} not found in data")
+            if signal not in df.columns:
                 continue
                 
             # Calculate aggregations for this signal
@@ -280,16 +261,18 @@ class AggregateData:
                     delta = df[signal].diff()
                     value = delta[delta < 0].sum()
                 else:
-                    self.logger.warning(f"Unsupported aggregation type: {agg_type}")
+                    self.logger.warning(f"---- Unsupported aggregation type: {agg_type}")
                     continue
                     
                 # Calculate count and duration like the original implementation
-                count = trip_df[signal].count()
-                duration = (trip_df[time_col].max() - trip_df[time_col].min()).total_seconds()
-                
+                count = df[signal].count()
+                duration = (df["t"].max() - df["t"].min()).total_seconds()
+
                 # Create a trip ID using the same format as original
-                trip_id = f"{device_id}_{start_time.strftime('%Y%m%dT%H%M%S.%f')}"
-                
+                trip_id = f"{device_id}_{(trip_window[0].strftime('%Y%m%dT%H%M%S.%f'))}"
+                trip_start = trip_window[0]
+                trip_end = trip_window[1]
+        
                 # Append result as a list in the same order as the columns
                 if value is not None:
                     results.append(
@@ -301,8 +284,8 @@ class AggregateData:
                             float(value),
                             count,
                             duration,
-                            start_time,  
-                            end_time,  
+                            trip_start,  
+                            trip_end,  
                             trip_id,
                             cluster_name,
                         ]
@@ -310,17 +293,8 @@ class AggregateData:
                 
         return results
 
+    # Function for writing the results from one day to a Parquet file
     def write_results_to_parquet(self, results, date):
-        """
-        Write aggregation results to a Parquet file
-        
-        Args:
-            results (list): List of aggregation results
-            date (datetime): Date for the file name
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
         import pyarrow.parquet as pq
         import pyarrow as pa
         
@@ -331,23 +305,21 @@ class AggregateData:
         try:
             # Create DataFrame with explicit column names matching the original implementation
             df = pd.DataFrame(
-                results,
-                columns=[
-                    "DeviceID",
-                    "Message",
-                    "Signal",
-                    "Aggregation",
-                    "SignalValue",
-                    "SignalCount",
-                    "Duration",
-                    "TripStart",
-                    "TripEnd",
-                    "TripID",
-                    "Cluster",
-                ]
+            results,
+            columns=[
+                "DeviceID",
+                "Message",
+                "Signal",
+                "Aggregation",
+                "SignalValue",
+                "SignalCount",
+                "Duration",
+                "TripStart",
+                "TripEnd",
+                "TripID",
+                "Cluster",
+            ],
             )
-            
-            # Define schema exactly like the original implementation
             schema = pa.schema(
                 [
                     ("DeviceID", pa.string()),
@@ -368,17 +340,12 @@ class AggregateData:
             date_path = date.strftime("%Y/%m/%d")
             
             if self.cloud == "Local":
-                # Local file path construction (matching the original)
                 local_path = f"{self.output_bucket}/{self.aggregations_folder}/{self.table_name}/{date_path}"
-                # Create directory structure if it doesn't exist
                 os.makedirs(local_path, exist_ok=True)
                 file_path = f"{local_path}/{date.strftime('%Y%m%d')}.parquet"
-                
-                # Write the file using PyArrow
                 pq.write_table(pa.Table.from_pandas(df, schema=schema), file_path)
                 self.logger.info(f"- Stored aggregation Parquet locally | {len(results)} rows | {file_path}")
                 return True
-                
             else:
                 # For cloud storage, use a temp file and upload
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tmp_file:
@@ -402,32 +369,18 @@ class AggregateData:
                     os.remove(tmp_file.name)
                     
                     if success:
-                        self.logger.info(f"Stored aggregation Parquet on cloud | {len(results)} rows | {cloud_path}")
+                        self.logger.info(f"- Stored aggregation Parquet on cloud | {len(results)} rows | {cloud_path}")
                         return True
                     else:
-                        self.logger.error(f"Failed to upload results to {cloud_path}")
+                        self.logger.error(f"- Failed to upload results to {cloud_path}")
                         return False
                     
         except Exception as e:
-            self.logger.error(f"Error writing results to Parquet: {e}")
+            self.logger.error(f"- Error writing results to Parquet: {e}")
             return False
-            return False
-
+   
+    # Function for extracting cluster details from config
     def get_cluster_detail(self, config, cluster):
-        """
-        Get cluster details from configuration
-        
-        Args:
-            config (dict): Configuration dictionary
-            cluster (str): Cluster name
-            
-        Returns:
-            dict: Cluster details or None if not found
-        """
-        if not config:
-            return None
-            
-        # Find cluster in cluster_details
         for cluster_detail in config.get("cluster_details", []):
             if cluster in cluster_detail.get("clusters"):
                 return cluster_detail
@@ -435,22 +388,10 @@ class AggregateData:
         self.logger.warning(f"Cluster {cluster} not found in configuration")
         return None
 
+    # Function for processing a single device
     def process_single_device(
         self, cluster, device_id, cluster_detail, cluster_aggregations, date_path
     ):
-        """
-        Process a single device for the specified date
-        
-        Args:
-            cluster (str): Cluster name
-            device_id (str): Device ID
-            cluster_detail (dict): Cluster details
-            cluster_aggregations (list): List of aggregation configurations
-            date_path (str): Path to the date directory (YYYY/MM/DD)
-            
-        Returns:
-            list: List of aggregation results
-        """
         import pandas as pd
         import pyarrow.parquet as pq
         
@@ -471,8 +412,7 @@ class AggregateData:
                 return []
             
             # extract data aggregation values per trip and add to device_results
-            # Use the aggregations array from the details object if cluster_aggregations is empty
-            aggregations_list = cluster_aggregations or cluster_detail.get("details", {}).get("aggregations", [])
+            aggregations_list = cluster_aggregations
             for agg in aggregations_list:
                 agg_message = agg.get("message", "")
                 if not agg_message:
@@ -521,17 +461,9 @@ class AggregateData:
             
         return device_results
 
+    # Function for overall processing of the data lake
     def process_data_lake(self):
-        """
-        Process the data lake for all configured devices
-        
-        Args:
-            config (dict): Configuration dictionary or None to load from file
-            
-        Returns:
-            int: Number of days with data processed
-        """
-        
+    
         config = self.load_aggregation_json()
       
         if not config or config == []:
@@ -556,7 +488,7 @@ class AggregateData:
                 if not cluster_detail:
                     continue
                     
-                cluster_aggregations = cluster_detail.get(self.aggregations_folder, [])
+                cluster_aggregations = cluster_detail.get("details", {}).get("aggregations", [])
                 self.logger.info(f"- Processing cluster: {cluster}")
                 
                 # Process each device in cluster
