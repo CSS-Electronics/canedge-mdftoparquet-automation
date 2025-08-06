@@ -2,8 +2,8 @@
   "config": {
     "date": {
       "mode": "specific_period",
-      "start_date": "2020-01-01",
-      "end_date": "2025-01-01"
+      "start_date": "2022-05-30",
+      "end_date": "2022-06-01"
     },
     "trip": {
       "trip_gap_min": 10,

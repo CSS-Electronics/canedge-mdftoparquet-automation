@@ -56,8 +56,8 @@ def setup_environment():
     # Ensure bucket directories exist
     for path in [input_bucket_path, output_bucket_path]:
         if not os.path.exists(path):
-            os.makedirs(path)
-            logger.info(f"Created directory: {path}")
+            logger.error(f"Path does not exist: {path}")
+            sys.exit()
     
     logger.info(f"Input bucket path: {input_bucket_path}")
     logger.info(f"Output bucket path: {output_bucket_path}")
@@ -106,13 +106,49 @@ def run_aggregation():
         if not config:
             logger.error("Failed to load aggregation configuration")
             return False
+    
+        logger.info(config)
         
         # Process the data
+        logger.info("Starting data processing with configuration")
+        # Access config values directly instead of attributes
+        date_config = config.get('config', {}).get('date', {})
+        date_mode = date_config.get('mode')
+        start_date = date_config.get('start_date')
+        end_date = date_config.get('end_date')
+        trip_config = config.get('config', {}).get('trip', {})
+        trip_gap = trip_config.get('trip_gap_min')
+        trip_min_length = trip_config.get('trip_min_length_min')
+        
+        logger.info(f"Date mode from config: {date_mode}")
+        logger.info(f"Start date from config: {start_date}")
+        logger.info(f"End date from config: {end_date}")
+        logger.info(f"Trip gap minutes from config: {trip_gap}")
+        logger.info(f"Trip min length minutes from config: {trip_min_length}")
+        logger.info(f"Clusters: {config.get('device_clusters', [])}")
+        
+        # Also log internal aggregator attributes for validation
+        logger.info(f"Aggregator start_date: {aggregator.start_date}")
+        logger.info(f"Aggregator end_date: {aggregator.end_date}")
+        logger.info(f"Aggregator trip_gap_min: {aggregator.trip_gap_min}")
+        logger.info(f"Aggregator trip_min_length_min: {aggregator.trip_min_length_min}")
+        
+        # Run data processing
         days_processed = aggregator.process_data_lake(config)
         
-        logger.info(f"Aggregation completed with {days_processed} days processed")
-        # Return True even if no days were processed - this is not an error condition
-        # as there might simply be no data for the specified date range
+        # Check if any days were processed
+        logger.info(f"Days processed: {days_processed}")
+        
+        # Check if any aggregation files were created
+        aggregation_dir = os.path.join(output_bucket_path, "aggregations")
+        if os.path.exists(aggregation_dir):
+            logger.info(f"Aggregation directory exists: {aggregation_dir}")
+            for root, dirs, files in os.walk(aggregation_dir):
+                for file in files:
+                    logger.info(f"Found aggregation file: {os.path.join(root, file)}")
+        else:
+            logger.info(f"Aggregation directory does not exist: {aggregation_dir}")
+            
         logger.info("\n✅ Aggregation process completed successfully\n")
         return True
         

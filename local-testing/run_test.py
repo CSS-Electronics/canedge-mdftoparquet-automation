@@ -210,12 +210,8 @@ def process_aggregation(cloud, input_bucket):
     # Execute the aggregation script
     try:
         logger.info(f"Executing: {sys.executable} {agg_script_path}")
-        result = subprocess.run([sys.executable, agg_script_path], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, agg_script_path])
         
-        # Print the output regardless of return code
-        if result.stdout.strip():
-            logger.info(f"Aggregation script output:\n{result.stdout}")
-            
         if result.returncode == 0:
             logger.info("\n\u2705 Local aggregation test completed successfully\n")
             return True

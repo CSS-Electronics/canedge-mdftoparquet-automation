@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 import sys
 import tempfile
-from modules.cloud_functions import download_object, upload_object, list_objects, normalize_object_path
+from modules.cloud_functions import upload_object, list_objects
 from modules.utils import DownloadObjects
 
 class AggregateData:
@@ -24,10 +24,6 @@ class AggregateData:
         table_name (str): Name of the output table
         logger: Logger object for logging messages
         
-    Note: The following parameters are now extracted from the aggregations.json file:
-        - trip_gap_min: Gap in minutes to determine a new trip
-        - trip_min_length_min: Minimum trip length in minutes
-        - date configuration (mode, start_date, end_date)
     """
 
     def __init__(
@@ -150,11 +146,11 @@ class AggregateData:
             if 'trip_min_length_min' in trip_config:
                 self.trip_min_length_min = trip_config['trip_min_length_min']
                 self.logger.info(f"Using trip minimum length from config: {self.trip_min_length_min}")
-        
-        # Extract date parameters
+    
+        # Extract date parameters - ensure proper configuration is provided
         if not ('config' in config and 'date' in config['config']):
             raise ValueError("Missing required 'date' configuration in aggregation config")
-            
+        
         date_config = config['config']['date']
         date_mode = date_config.get('mode')
         
@@ -168,15 +164,26 @@ class AggregateData:
             self.logger.info(f"Using previous day mode: {self.start_date.strftime('%Y-%m-%d')}")
         elif date_mode == 'specific_period':
             # Parse start_date and end_date from config - no defaults allowed
-            if 'start_date' not in date_config or 'end_date' not in date_config:
-                raise ValueError("For 'specific_period' mode, both 'start_date' and 'end_date' must be specified")
-                
+            if 'start_date' not in date_config:
+                raise ValueError("For 'specific_period' mode, 'start_date' must be explicitly specified")
+            if 'end_date' not in date_config:
+                raise ValueError("For 'specific_period' mode, 'end_date' must be explicitly specified")
+            
             start_date_str = date_config['start_date']
             end_date_str = date_config['end_date']
+            
+            # Ensure date strings are not empty
+            if not start_date_str or not end_date_str:
+                raise ValueError("For 'specific_period' mode, dates cannot be empty strings")
             
             try:
                 self.start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
                 self.end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+                
+                # Validate date range
+                if self.end_date < self.start_date:
+                    raise ValueError(f"Invalid date range: end_date {end_date_str} is before start_date {start_date_str}")
+                
                 self.logger.info(f"Using date range from config: {start_date_str} to {end_date_str}")
             except ValueError as e:
                 raise ValueError(f"Invalid date format in configuration. Dates must be in 'YYYY-MM-DD' format: {e}")
@@ -227,24 +234,41 @@ class AggregateData:
         Returns:
             list: List of Parquet file paths
         """
-        parquet_files = []
+        files = []
         
         try:
-            # List objects with the given prefix
-            result = list_objects(self.cloud, self.client, self.output_bucket, self.logger, prefix=prefix)
-            
-            # Filter for Parquet files
-            for obj in result.get("objects", []):
-                file_path = obj["name"]
-                if file_path.endswith(".parquet"):
-                    parquet_files.append(file_path)
+            if self.cloud == "Local":
+                # For Local, use os.walk to find all Parquet files matching the prefix
+                prefix_path = os.path.join(self.output_bucket, prefix)
+                self.logger.info(f"--- Looking for Parquet files in: {prefix_path}")
+                
+                # Check if the path exists
+                if not os.path.exists(prefix_path):
+                    self.logger.info(f"--- Path does not exist: {prefix_path}")
+                    return []
                     
-            self.logger.info(f"Found {len(parquet_files)} Parquet files with prefix {prefix}")
-            
+                # Walk through all subdirectories
+                for root, _, filenames in os.walk(prefix_path):
+                    for filename in filenames:
+                        if filename.endswith(".parquet"):
+                            # Get the relative path from output_bucket
+                            rel_path = os.path.relpath(os.path.join(root, filename), self.output_bucket)
+                            files.append(rel_path)
+                
+                self.logger.info(f"Found {len(files)} Parquet files with prefix {prefix}")
+            else:
+                # List objects with the given prefix
+                result = list_objects(self.cloud, self.client, self.output_bucket, self.logger, prefix=prefix)
+                
+                # Filter for Parquet files
+                for obj in result.get("objects", []):
+                    file_path = obj["name"]
+                    if file_path.endswith(".parquet"):
+                        files.append(file_path)
         except Exception as e:
             self.logger.error(f"Error listing Parquet files: {e}")
-            
-        return parquet_files
+        
+        return files
 
     def get_parquet_files(self, files, temp_dir):
         """
@@ -525,7 +549,7 @@ class AggregateData:
             
         # Find cluster in cluster_details
         for cluster_detail in config.get("cluster_details", []):
-            if cluster_detail.get("cluster") == cluster:
+            if cluster in cluster_detail.get("clusters"):
                 return cluster_detail
                 
         self.logger.warning(f"Cluster {cluster} not found in configuration")
@@ -555,7 +579,7 @@ class AggregateData:
             files = self.list_parquet_files(prefix)
             
             if not files:
-                self.logger.info(f"No files found for {device_id} on {date_path}")
+                self.logger.info(f"--- No files found for {device_id}")
                 return []
             
             # Use temporary directory with context manager for clean auto-removal
@@ -638,11 +662,11 @@ class AggregateData:
                     continue
                     
                 cluster_aggregations = cluster_detail.get(self.aggregations_folder, [])
-                self.logger.info(f"Processing cluster: {cluster}")
+                self.logger.info(f"- Processing cluster: {cluster}")
                 
                 # Process each device in cluster
                 for device_id in device_cluster.get("devices", []):
-                    self.logger.info(f"Processing device: {device_id}")
+                    self.logger.info(f"-- Processing device: {device_id}")
                     
                     device_results = self.process_single_device(
                         cluster,
@@ -660,7 +684,7 @@ class AggregateData:
                 days_processed += 1
                 self.write_results_to_parquet(daily_results, single_date)
             else:
-                self.logger.info(f"No data extracted for {single_date}")
+                self.logger.info(f"- No data extracted for {single_date}")
                 
         self.logger.info(f"Stored {days_processed} days with data across {total_days} days")
         return days_processed
