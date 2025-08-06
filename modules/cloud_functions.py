@@ -83,7 +83,7 @@ def normalize_object_path(path):
     path_str = str(path) if not isinstance(path, str) else path
     return path_str.replace('\\', '/')
 
-def download_object(cloud, client, bucket, object_path, local_path, logger):
+def download_object(cloud, client, bucket, object_path, local_path, logger, supress=False):
     """
     Download an object from a cloud storage bucket to a local file.
     
@@ -109,7 +109,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
         try:
             # Download the object from S3
             client.download_file(bucket, object_path, local_path)
-            if logger:
+            if logger and supress == False:
                 logger.info(f"Successfully downloaded {object_path} from {bucket} to {local_path}")
             return True
         except Exception as e:
@@ -129,7 +129,8 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
             # Download the blob
             blob.download_to_filename(str(local_path))
             
-            logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
+            if supress == False:
+                logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
             return True
         except Exception as e:
             logger.info(f"Failed to download {bucket}/{object_path}")
@@ -145,8 +146,9 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
             with open(str(local_path), "wb") as file:
                 download_stream = blob_client.download_blob()
                 file.write(download_stream.readall())
-                
-            logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
+            
+            if supress == False:
+                logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
             return True
         except Exception as e:
             logger.info(f"Failed to download {bucket}/{object_path}")
@@ -164,7 +166,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
             # Copy the file
             shutil.copy2(source_path, local_path)
             
-            if logger:
+            if logger and supress == False:
                 logger.info(f"Copied {object_path} from Local storage: {bucket} to {local_path}")
             return True
         except Exception as e:

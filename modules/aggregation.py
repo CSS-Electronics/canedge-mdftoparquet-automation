@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 import sys
 import tempfile
-from modules.cloud_functions import upload_object, list_objects
+from modules.cloud_functions import upload_object, list_objects, download_object
 from modules.utils import DownloadObjects
 
 class AggregateData:
@@ -51,19 +51,8 @@ class AggregateData:
         
         # Default date parameters (will be overridden by config)
         self.start_date = datetime.today() - timedelta(days=1)
-        self.end_date = self.start_date
-            
-        # Setup logger if not provided
-        if logger is None:
-            self.logger = logging.getLogger("AggregateData")
-            if not self.logger.handlers:
-                handler = logging.StreamHandler(sys.stdout)
-                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-                handler.setFormatter(formatter)
-                self.logger.addHandler(handler)
-                self.logger.setLevel(logging.INFO)
-        else:
-            self.logger = logger
+        self.end_date = self.start_date        
+        self.logger = logger
             
         self.logger.info(f"Initialized AggregateData with cloud={cloud}, input_bucket={input_bucket}, output_bucket={output_bucket}")
 
@@ -78,7 +67,6 @@ class AggregateData:
         
         try:
             if self.cloud == "Local" and os.path.isdir(self.input_bucket):
-                # For Local, directly load the file if it exists
                 file_path = os.path.join(self.input_bucket, self.aggregations_file)
                 if os.path.isfile(file_path):
                     self.logger.info(f"Loading aggregation config from local file: {file_path}")
@@ -238,33 +226,28 @@ class AggregateData:
         
         try:
             if self.cloud == "Local":
-                # For Local, use os.walk to find all Parquet files matching the prefix
-                prefix_path = os.path.join(self.output_bucket, prefix)
-                self.logger.info(f"--- Looking for Parquet files in: {prefix_path}")
+                # Extract device ID and date components from prefix
+                parts = prefix.replace('\\', '/').split('/')
+                device_id = parts[0]
+                date_path = '/'.join(parts[1:]) if len(parts) > 1 else ''
                 
-                # Check if the path exists
-                if not os.path.exists(prefix_path):
-                    self.logger.info(f"--- Path does not exist: {prefix_path}")
+                device_dir = os.path.join(self.output_bucket, device_id)
+                if not os.path.exists(device_dir):
+                    # self.logger.info(f"--- Device directory not found: {device_dir}")
                     return []
                     
-                # Walk through all subdirectories
-                for root, _, filenames in os.walk(prefix_path):
-                    for filename in filenames:
-                        if filename.endswith(".parquet"):
-                            # Get the relative path from output_bucket
-                            rel_path = os.path.relpath(os.path.join(root, filename), self.output_bucket)
-                            files.append(rel_path)
+                # Use a simple glob pattern with pathlib to find all matching parquet files
+                from pathlib import Path
+                parquet_files = Path(device_dir).glob(f"**/*{date_path}*/*.parquet")
+                files = [str(f.relative_to(self.output_bucket)).replace('\\', '/') for f in parquet_files]
                 
-                self.logger.info(f"Found {len(files)} Parquet files with prefix {prefix}")
+                # self.logger.info(f"--- Found {len(files)} Parquet files for {prefix}")
             else:
-                # List objects with the given prefix
+                # For cloud storage, use list_objects
                 result = list_objects(self.cloud, self.client, self.output_bucket, self.logger, prefix=prefix)
                 
                 # Filter for Parquet files
-                for obj in result.get("objects", []):
-                    file_path = obj["name"]
-                    if file_path.endswith(".parquet"):
-                        files.append(file_path)
+                files = [obj["name"] for obj in result.get("objects", []) if obj["name"].endswith(".parquet")]
         except Exception as e:
             self.logger.error(f"Error listing Parquet files: {e}")
         
@@ -281,21 +264,21 @@ class AggregateData:
         Returns:
             list: List of local file paths
         """
-        # Create a DownloadObjects instance for efficient downloading
-        downloader = DownloadObjects(
-            self.cloud,
-            self.client,
-            self.output_bucket,
-            Path(temp_dir),
-            self.logger
-        )
-        
         local_files = []
         
         for file_path in files:
             local_path = os.path.join(temp_dir, os.path.basename(file_path))
             
-            success = downloader.download_file(file_path, Path(local_path))
+            # Use the cloud-agnostic download_object function from cloud_functions.py
+            success = download_object(
+                self.cloud, 
+                self.client, 
+                self.output_bucket, 
+                file_path, 
+                local_path,
+                self.logger,
+                True
+            )
             
             if success:
                 local_files.append(local_path)
@@ -309,78 +292,90 @@ class AggregateData:
         Identify trip windows based on time gaps in the data
         
         Args:
-            trip_path (str): Path to the Parquet file with trip data
+            trip_path (str): Path prefix to directory containing Parquet files with trip data
             
         Returns:
             list: List of trip windows (start and end timestamps)
         """
+        import pyarrow.parquet as pq
+        
         try:
-            # Load Parquet data
-            df = pd.read_parquet(trip_path)
-            
-            if 'TimeStamp' not in df.columns:
-                self.logger.warning(f"No TimeStamp column in {trip_path}")
+            # List Parquet files in trip directory
+            files = self.list_parquet_files(trip_path)
+            if len(files) == 0:
                 return []
                 
-            # Sort by TimeStamp
-            df = df.sort_values('TimeStamp')
+            # Download files and load into dataframes
+            with tempfile.TemporaryDirectory(prefix=f"temp_trips_{Path(trip_path).name}_") as temp_dir:
+                # Download files if needed
+                local_files = self.get_parquet_files(files, temp_dir)
+                if not local_files:
+                    return []
+                    
+                # Read all Parquet files and concatenate
+                dfs = [pq.read_table(f).to_pandas() for f in local_files]
+                if not dfs:
+                    return []
+                    
+                df = pd.concat(dfs, ignore_index=True)
             
-            if len(df) == 0:
-                return []
-                
-            # Convert to datetime if not already
-            if not pd.api.types.is_datetime64_any_dtype(df['TimeStamp']):
-                df['TimeStamp'] = pd.to_datetime(df['TimeStamp'])
-                
-            # Calculate time diffs
-            df['TimeDiff'] = df['TimeStamp'].diff().dt.total_seconds() / 60
-            
-            # Find gaps larger than trip_gap_min
-            trip_breaks = df[df['TimeDiff'] > self.trip_gap_min].index.tolist()
-            
-            # Initialize trip windows
-            trip_windows = []
-            
-            if len(trip_breaks) == 0:
-                # Only one trip
-                start_time = df['TimeStamp'].iloc[0]
-                end_time = df['TimeStamp'].iloc[-1]
-                
-                # Check if trip is long enough
-                trip_length = (end_time - start_time).total_seconds() / 60
-                if trip_length >= self.trip_min_length_min:
-                    trip_windows.append((start_time, end_time))
+            # Look for TimeStamp or t column
+            time_col = None
+            if 'TimeStamp' in df.columns:
+                time_col = 'TimeStamp'
+            elif 't' in df.columns:
+                time_col = 't'
             else:
-                # Multiple trips
-                start_idx = 0
+                self.logger.warning(f"No TimeStamp or t column in files from {trip_path}")
+                return []
                 
-                for break_idx in trip_breaks:
-                    # Get trip window
-                    start_time = df['TimeStamp'].iloc[start_idx]
-                    end_time = df['TimeStamp'].iloc[break_idx - 1]
-                    
-                    # Check if trip is long enough
-                    trip_length = (end_time - start_time).total_seconds() / 60
-                    if trip_length >= self.trip_min_length_min:
-                        trip_windows.append((start_time, end_time))
-                        
-                    # Update start index
-                    start_idx = break_idx
-                    
-                # Last trip
-                if start_idx < len(df):
-                    start_time = df['TimeStamp'].iloc[start_idx]
-                    end_time = df['TimeStamp'].iloc[-1]
-                    
-                    trip_length = (end_time - start_time).total_seconds() / 60
-                    if trip_length >= self.trip_min_length_min:
-                        trip_windows.append((start_time, end_time))
+            # Ensure datetime format
+            df[time_col] = pd.to_datetime(df[time_col])
+            
+            # Sort by time
+            df = df.sort_values(time_col)
+            
+            # Calculate time differences between consecutive rows
+            df['time_diff'] = df[time_col].diff()
+            
+            # Identify trip starts (rows where the time difference exceeds the gap threshold)
+            trip_starts = df[df['time_diff'] > pd.Timedelta(minutes=self.trip_gap_min)][time_col].tolist()
+            
+            # Always include the first timestamp as a trip start
+            if len(df) > 0 and df[time_col].iloc[0] not in trip_starts:
+                trip_starts.insert(0, df[time_col].iloc[0])
                 
-            self.logger.info(f"Found {len(trip_windows)} trip windows in {trip_path}")
+            # No trips found
+            if len(trip_starts) == 0:
+                return []
+                
+            # Identify trip ends
+            trip_ends = []
+            
+            # For each trip start except the last one, find the last timestamp before the next trip starts
+            for i in range(len(trip_starts) - 1):
+                # Find the last timestamp before the next trip starts
+                mask = df[time_col] < trip_starts[i + 1]
+                if mask.any():
+                    end_time = df[mask][time_col].iloc[-1]
+                    trip_ends.append(end_time)
+            
+            # The end of the last trip is the last timestamp in the data
+            if len(df) > 0:
+                trip_ends.append(df[time_col].iloc[-1])
+                
+            # Filter out trips that are shorter than the minimum duration
+            trip_windows = [
+                (start, end)
+                for start, end in zip(trip_starts, trip_ends)
+                if (end - start) >= pd.Timedelta(minutes=self.trip_min_length_min)
+            ]
+            
+            self.logger.info(f"--- Found {len(trip_windows)} trip windows in {trip_path}")
             return trip_windows
             
         except Exception as e:
-            self.logger.error(f"Error identifying trip windows: {e}")
+            # self.logger.error(f"--- Error identifying trip windows: {e}")
             return []
 
     def daterange(self):
@@ -420,8 +415,18 @@ class AggregateData:
         """
         start_time, end_time = trip_window
         
+        # Determine which time column is present (t or TimeStamp)
+        time_col = None
+        if 't' in df.columns:
+            time_col = 't'
+        elif 'TimeStamp' in df.columns:
+            time_col = 'TimeStamp'
+        else:
+            self.logger.warning(f"No timestamp column (t or TimeStamp) found in data for {message}")
+            return []
+            
         # Filter DataFrame for the trip window
-        trip_df = df[(df['TimeStamp'] >= start_time) & (df['TimeStamp'] <= end_time)]
+        trip_df = df[(df[time_col] >= start_time) & (df[time_col] <= end_time)]
         
         if len(trip_df) == 0:
             return []
@@ -430,7 +435,7 @@ class AggregateData:
         start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
         end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
         
-        self.logger.info(f"Processing trip from {start_str} to {end_str} for device {device_id}, message {message}")
+        self.logger.info(f"---- Processing trip from {start_str} to {end_str} for device {device_id}, message {message}")
         
         # Calculate aggregations
         results = []
@@ -444,30 +449,56 @@ class AggregateData:
             for agg_type in aggregation_types:
                 if agg_type == 'avg':
                     value = trip_df[signal].mean()
+                elif agg_type == 'median':
+                    value = trip_df[signal].median()
                 elif agg_type == 'min':
                     value = trip_df[signal].min()
                 elif agg_type == 'max':
                     value = trip_df[signal].max()
+                elif agg_type == 'sum':
+                    value = trip_df[signal].sum()
                 elif agg_type == 'count':
                     value = len(trip_df)
+                elif agg_type == 'first':
+                    value = trip_df[signal].iloc[0] if len(trip_df) > 0 else None
+                elif agg_type == 'last':
+                    value = trip_df[signal].iloc[-1] if len(trip_df) > 0 else None
+                elif agg_type == 'delta_sum':
+                    value = trip_df[signal].diff().sum()
+                elif agg_type == 'delta_sum_pos':
+                    delta = trip_df[signal].diff()
+                    value = delta[delta > 0].sum()
+                elif agg_type == 'delta_sum_neg':
+                    delta = trip_df[signal].diff()
+                    value = delta[delta < 0].sum()
                 else:
                     self.logger.warning(f"Unsupported aggregation type: {agg_type}")
                     continue
                     
-                # Create result record
-                result = {
-                    'device_id': device_id,
-                    'cluster': cluster_name,
-                    'message': message,
-                    'signal': signal,
-                    'aggregation': agg_type,
-                    'value': float(value),
-                    'start_time': start_str,
-                    'end_time': end_str,
-                    'date': start_time.strftime("%Y-%m-%d")
-                }
+                # Calculate count and duration like the original implementation
+                count = trip_df[signal].count()
+                duration = (trip_df[time_col].max() - trip_df[time_col].min()).total_seconds()
                 
-                results.append(result)
+                # Create a trip ID using the same format as original
+                trip_id = f"{device_id}_{start_time.strftime('%Y%m%dT%H%M%S.%f')}"
+                
+                # Append result as a list in the same order as the columns
+                if value is not None:
+                    results.append(
+                        [
+                            device_id,
+                            message,
+                            signal,
+                            agg_type,
+                            float(value),
+                            count,
+                            duration,
+                            start_time,  
+                            end_time,  
+                            trip_id,
+                            cluster_name,
+                        ]
+                    )
                 
         return results
 
@@ -482,55 +513,96 @@ class AggregateData:
         Returns:
             bool: True if successful, False otherwise
         """
+        import pyarrow.parquet as pq
+        import pyarrow as pa
+        
         if not results:
             self.logger.info("No results to write")
             return False
             
         try:
-            # Convert results to DataFrame
-            df = pd.DataFrame(results)
+            # Create DataFrame with explicit column names matching the original implementation
+            df = pd.DataFrame(
+                results,
+                columns=[
+                    "DeviceID",
+                    "Message",
+                    "Signal",
+                    "Aggregation",
+                    "SignalValue",
+                    "SignalCount",
+                    "Duration",
+                    "TripStart",
+                    "TripEnd",
+                    "TripID",
+                    "Cluster",
+                ]
+            )
             
-            # Convert datetime columns to pandas datetime objects
-            for col in ["start_time", "end_time"]:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col])
+            # Define schema exactly like the original implementation
+            schema = pa.schema(
+                [
+                    ("DeviceID", pa.string()),
+                    ("Message", pa.string()),
+                    ("Signal", pa.string()),
+                    ("Aggregation", pa.string()),
+                    ("SignalValue", pa.float64()),
+                    ("SignalCount", pa.int64()),
+                    ("Duration", pa.float64()),
+                    ("TripStart", pa.timestamp("us")),
+                    ("TripEnd", pa.timestamp("us")),
+                    ("TripID", pa.string()),
+                    ("Cluster", pa.string()),
+                ]
+            )
+            
+            # Construct date path like the original
+            date_path = date.strftime("%Y/%m/%d")
+            
+            if self.cloud == "Local":
+                # Local file path construction (matching the original)
+                local_path = f"{self.output_bucket}/{self.aggregations_folder}/{self.table_name}/{date_path}"
+                # Create directory structure if it doesn't exist
+                os.makedirs(local_path, exist_ok=True)
+                file_path = f"{local_path}/{date.strftime('%Y%m%d')}.parquet"
+                
+                # Write the file using PyArrow
+                pq.write_table(pa.Table.from_pandas(df, schema=schema), file_path)
+                self.logger.info(f"Stored aggregation Parquet locally | {len(results)} rows | {file_path}")
+                return True
+                
+            else:
+                # For cloud storage, use a temp file and upload
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tmp_file:
+                    # Write DataFrame to Parquet file locally with the schema
+                    pq.write_table(pa.Table.from_pandas(df, schema=schema), tmp_file.name)
                     
-            # Format date for file name
-            date_str = date.strftime("%Y-%m-%d")
-            
-            # Use temporary file with context manager
-            with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as temp_file:
-                temp_file_path = temp_file.name
-                
-                # Write to temporary file (closing it first since pandas will reopen it)
-                temp_file.close()
-                df.to_parquet(temp_file_path, index=False)
-                
-                # Define output path
-                output_path = f"{self.aggregations_folder}/{self.table_name}/{date_str}.parquet"
-                
-                # Upload to output bucket
-                success = upload_object(
-                    self.cloud,
-                    self.client,
-                    self.output_bucket,
-                    output_path,
-                    temp_file_path,
-                    self.logger
-                )
-                
-                # Clean up temp file
-                os.remove(temp_file_path)
-                
-                if success:
-                    self.logger.info(f"Successfully wrote {len(results)} results to {output_path}")
-                    return True
-                else:
-                    self.logger.error(f"Failed to upload results to {output_path}")
-                    return False
+                    # Define cloud path
+                    cloud_path = f"{self.aggregations_folder}/{self.table_name}/{date_path}/{date.strftime('%Y%m%d')}.parquet"
+                    
+                    # Upload to cloud storage
+                    success = upload_object(
+                        self.cloud,
+                        self.client,
+                        self.output_bucket,
+                        cloud_path,
+                        tmp_file.name,
+                        self.logger
+                    )
+                    
+                    # Clean up temp file
+                    os.remove(tmp_file.name)
+                    
+                    if success:
+                        self.logger.info(f"Stored aggregation Parquet on cloud | {len(results)} rows | {cloud_path}")
+                        return True
+                    else:
+                        self.logger.error(f"Failed to upload results to {cloud_path}")
+                        return False
                     
         except Exception as e:
             self.logger.error(f"Error writing results to Parquet: {e}")
+            return False
             return False
 
     def get_cluster_detail(self, config, cluster):
@@ -571,60 +643,75 @@ class AggregateData:
         Returns:
             list: List of aggregation results
         """
+        import pandas as pd
+        import pyarrow.parquet as pq
+        
         device_results = []
         
         try:
-            # List Parquet files for this device/date
-            prefix = f"{device_id}/{date_path}"
-            files = self.list_parquet_files(prefix)
-            
-            if not files:
-                self.logger.info(f"--- No files found for {device_id}")
+            # identify trip windows for the device & day based on the cluster trip message
+            trip_message = cluster_detail.get("details", {}).get("trip_identifier", {}).get("message", "")
+            if trip_message == "":
+                self.logger.info(f"--- No trip identifier message found for cluster {cluster}")
+                return []
+
+            # Get trip windows for the device using the trip identifier message
+            trip_path = f"{device_id}/{trip_message}/{date_path}"
+            trip_windows = self.get_trip_windows(trip_path)
+            if len(trip_windows) == 0:
+                # self.logger.info(f"--- No trip windows found for {device_id}")
                 return []
             
-            # Use temporary directory with context manager for clean auto-removal
-            with tempfile.TemporaryDirectory(prefix=f"temp_{device_id}_{date_path.replace('/', '_')}_") as temp_dir:
-                # Download files
-                local_files = self.get_parquet_files(files, temp_dir)
+            # extract data aggregation values per trip and add to device_results
+            # Use the aggregations array from the details object if cluster_aggregations is empty
+            aggregations_list = cluster_aggregations or cluster_detail.get("details", {}).get("aggregations", [])
+            for agg in aggregations_list:
+                agg_message = agg.get("message", "")
+                if not agg_message:
+                    continue
+                    
+                agg_path = f"{device_id}/{agg_message}/{date_path}"
                 
-                if not local_files:
-                    return []
+                # list files in message directory path
+                files = self.list_parquet_files(agg_path)
+                if len(files) == 0:
+                    self.logger.info(f"--- No Parquet files found for {agg_message} - skipping")
+                    continue
+
+                # download files to temp dir and process
+                with tempfile.TemporaryDirectory(prefix=f"temp_{device_id}_{agg_message}_{date_path.replace('/', '_')}_") as temp_dir:
+                    local_files = self.get_parquet_files(files, temp_dir)
+                    if not local_files:
+                        self.logger.info(f"--- Failed to download files for {agg_message}")
+                        continue
+                        
+                    # Read parquet files into dataframes and concatenate
+                    dfs = [pq.read_table(f).to_pandas() for f in local_files]
+                    if not dfs:
+                        continue
+                        
+                    df = pd.concat(dfs, ignore_index=True)
                     
-                # Process each aggregation from cluster config
-                for aggregation in cluster_aggregations:
-                    message = aggregation.get('message')
-                    signals = aggregation.get('signals', [])
-                    aggregation_types = aggregation.get('aggregation_types', ['avg', 'min', 'max', 'count'])
-                    
-                    self.logger.info(f"Processing {message} with {len(signals)} signals")
-                    
-                    # Find files matching this message
-                    message_files = [f for f in local_files if message.lower() in f.lower()]
-                    
-                    for trip_path in message_files:
-                        try:
-                            # Read data
-                            df = pd.read_parquet(trip_path)
+                    # Process each trip window
+                    for trip_window in trip_windows:
+                        agg_results = self.process_aggregation_for_trip(
+                            device_id,
+                            agg_message,
+                            agg.get("signal", []),
+                            agg.get("aggregation", []),
+                            trip_window,
+                            cluster,
+                            df
+                        )
+                        
+                        if agg_results:
+                            device_results.extend(agg_results)
                             
-                            # Get trip windows
-                            trip_windows = self.get_trip_windows(trip_path)
-                            
-                            # Process each trip
-                            for trip_window in trip_windows:
-                                agg_results = self.process_aggregation_for_trip(
-                                    device_id, message, signals, aggregation_types, trip_window, cluster, df
-                                )
-                                device_results.extend(agg_results)
-                                
-                        except Exception as e:
-                            self.logger.error(f"Error processing {trip_path}: {e}")
-            
-            # Temporary directory is automatically cleaned up after the with block
-            return device_results
-            
         except Exception as e:
             self.logger.error(f"Error processing device {device_id}: {e}")
             return []
+            
+        return device_results
 
     def process_data_lake(self, config=None):
         """
