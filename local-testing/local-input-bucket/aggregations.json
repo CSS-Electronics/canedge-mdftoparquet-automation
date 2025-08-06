@@ -1,4 +1,15 @@
 {
+  "config": {
+    "date": {
+      "mode": "specific_period",
+      "start_date": "2020-01-01",
+      "end_date": "2025-01-01"
+    },
+    "trip": {
+      "trip_gap_min": 10,
+      "trip_min_length_min": 1
+    }
+  },
   "device_clusters": [
     {
       "devices": [
@@ -11,7 +22,7 @@
   ],
   "cluster_details": [
     {
-	  "clusters": ["cluster1"],
+      "clusters": ["cluster1"],
       "details": {
         "trip_identifier": {
           "message": "CAN2_GnssSpeed"
@@ -46,7 +57,6 @@
             ],
             "aggregation": ["delta_sum"]
           }
-		  
         ]
       }
     }
