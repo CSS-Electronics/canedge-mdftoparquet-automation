@@ -17,17 +17,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import utility modules
 from modules.utils import ProcessBacklog
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger()
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Process a local backlog of MDF files')
     parser.add_argument('--input-folder', type=str, required=True, help='Local folder containing MDF files')
     args = parser.parse_args()
-    
-    # Set up logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger()
-    
-    # Get input folder from command-line argument
     input_folder = args.input_folder
     
     # Validate input folder

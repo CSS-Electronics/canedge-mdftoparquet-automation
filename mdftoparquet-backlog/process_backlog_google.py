@@ -12,59 +12,31 @@ import functions_framework
 from google.cloud import storage
 from modules.utils import ProcessBacklog
 
-
-# Configure the root logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
 
-def run_backlog_processing(input_bucket):
-    """Core backlog processing logic used by both HTTP handler and main function"""
-    # Initialize Google Cloud Storage client
+def run_backlog_processing():
+    input_bucket = os.environ.get("INPUT_BUCKET")
+    cloud = "Google"
     try:
         storage_client = storage.Client()
-        
-        # Process the backlog
-        logger.info(f"Starting backlog processing for bucket: {input_bucket}")
-        pb = ProcessBacklog("Google", storage_client, input_bucket, logger)
-        success = pb.process_backlog_from_cloud()
-        
-        if success:
-            logger.info("Backlog processing completed successfully")
-            return True
-        else:
-            logger.error("Backlog processing failed")
-            return False
-            
+        pb = ProcessBacklog(cloud, storage_client, input_bucket, logger)
+        pb.process_backlog_from_cloud()
+        return 0 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        return False
+        return 1
 
+# Google Cloud Function (HTTP trigger)
 @functions_framework.http
 def process_mdf_file(request):
-    """HTTP Cloud Function entry point - matches Terraform configuration"""
-    # Get environment variables - assume INPUT_BUCKET is always provided
-    input_bucket = os.environ.get('INPUT_BUCKET')
+    result = run_backlog_processing()
     
-    # Run the backlog processing
-    success = run_backlog_processing(input_bucket)
-    
-    if success:
+    if result == 0:
         return {"status": "success", "message": "Backlog processing completed successfully"}, 200
     else:
         return {"status": "error", "message": "Backlog processing failed"}, 500
-
-def main():
-    """Command-line entry point for local invocation"""
-    # Get input bucket directly from environment variables
-    # Assume these are set by the cloud environment or local_invocation.py
-    input_bucket = os.environ.get("INPUT_BUCKET")
-    
-    # Run the backlog processing
-    success = run_backlog_processing(input_bucket)
-    
-    # Return appropriate exit code
-    return 0 if success else 1
-        
+   
+# Local testing     
 if __name__ == "__main__":
-    # Just run the main function since it already uses environment variables
-    sys.exit(main())
+    sys.exit(run_backlog_processing())
