@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # Google Cloud Storage Aggregation Script
 # 
-# This script processes an aggregations.json file from a Google Cloud Storage bucket to aggregate Parquet data to trip summary level.
-# The aggregations.json should be located in the root of the input bucket.
+# This script processes an aggregations.json file from an input bucket to aggregate Parquet data to trip summary level.
 #
 # This is implemented as an HTTP-triggered Cloud Function.
 import os
@@ -10,7 +9,7 @@ import sys
 import logging
 import functions_framework
 from google.cloud import storage
-from modules.utils import AggregateData
+from modules.aggregation import AggregateData
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
@@ -36,7 +35,7 @@ def run_aggregation():
 
 # Google Cloud Function (HTTP trigger)
 @functions_framework.http
-def run_aggregation(request):
+def http_aggregation(request):
     result = run_aggregation()
     
     if result == 0:

@@ -348,9 +348,15 @@ class AggregateData:
                 return True
             else:
                 # For cloud storage, use a temp file and upload
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tmp_file:
+                tmp_file_path = None
+                try:
+                    # Create a named temporary file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tmp_file:
+                        tmp_file_path = tmp_file.name
+                    
                     # Write DataFrame to Parquet file locally with the schema
-                    pq.write_table(pa.Table.from_pandas(df, schema=schema), tmp_file.name)
+                    # We do this after closing the file to avoid keeping it open
+                    pq.write_table(pa.Table.from_pandas(df, schema=schema), tmp_file_path)
                     
                     # Define cloud path
                     cloud_path = f"{self.aggregations_folder}/{self.table_name}/{date_path}/{date.strftime('%Y%m%d')}.parquet"
@@ -361,12 +367,9 @@ class AggregateData:
                         self.client,
                         self.output_bucket,
                         cloud_path,
-                        tmp_file.name,
+                        tmp_file_path,
                         self.logger
                     )
-                    
-                    # Clean up temp file
-                    os.remove(tmp_file.name)
                     
                     if success:
                         self.logger.info(f"- Stored aggregation Parquet on cloud | {len(results)} rows | {cloud_path}")
@@ -374,6 +377,15 @@ class AggregateData:
                     else:
                         self.logger.error(f"- Failed to upload results to {cloud_path}")
                         return False
+                        
+                finally:
+                    # Clean up temp file in the finally block to ensure it happens
+                    if tmp_file_path and os.path.exists(tmp_file_path):
+                        try:
+                            os.remove(tmp_file_path)
+                        except Exception as e:
+                            self.logger.warning(f"Could not remove temporary file {tmp_file_path}: {e}")
+                            # Not a critical error, we can continue
                     
         except Exception as e:
             self.logger.error(f"- Error writing results to Parquet: {e}")

@@ -200,18 +200,45 @@ def process_aggregation(cloud, input_bucket):
         bool: True if the aggregation executed successfully, False otherwise
     """
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    agg_script_path = os.path.join(repo_root, "aggregation", "aggregation_local.py")
+    
+    # Use the appropriate script based on the cloud provider
+    if cloud == "Local":
+        script_name = "process_aggregation_local.py"
+    elif cloud == "Google":
+        script_name = "process_aggregation_google.py"
+    elif cloud == "Amazon":
+        script_name = "process_aggregation_amazon.py"
+    elif cloud == "Azure":
+        script_name = "process_aggregation_container.py"
+    else:
+        logger.error(f"Unsupported cloud provider: {cloud}")
+        return False
+    
+    agg_script_path = os.path.join(repo_root, "aggregation", script_name)
     
     # Check if the aggregation script exists
     if not os.path.exists(agg_script_path):
         logger.error(f"Aggregation script not found at {agg_script_path}")
         return False
     
-    result = subprocess.run([sys.executable, agg_script_path])
+    # Set up environment variables for cloud providers
+    env = os.environ.copy()
+    if cloud in ["Google", "Amazon", "Azure"]:
+        env["INPUT_BUCKET"] = input_bucket
+        
+    # For the container script, we need to explicitly set the CLOUD environment variable
+    if cloud == "Azure":
+        env["CLOUD"] = "Azure"
+    
+    # Execute the aggregation script
+    logger.info(f"Running aggregation script: {agg_script_path}")
+    result = subprocess.run([sys.executable, agg_script_path], env=env)
     
     if result.returncode == 0:
-        return True 
+        logger.info(f"Aggregation for {cloud} completed successfully")
+        return True
     else:
+        logger.error(f"Aggregation for {cloud} failed with return code {result.returncode}")
         return False
 
 

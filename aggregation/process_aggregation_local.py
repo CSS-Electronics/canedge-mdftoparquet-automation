@@ -14,10 +14,7 @@ Usage examples:
 
 import os
 import sys
-import argparse
 import logging
-from datetime import datetime, timedelta
-import json
 
 # Configure logging
 logging.basicConfig(
