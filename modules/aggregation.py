@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 import sys
 import tempfile
-from modules.cloud_functions import upload_object, list_objects, download_object
+from modules.cloud_functions import upload_object, list_objects, download_object, list_objects_with_pagination
 from modules.utils import DownloadObjects
 
 class AggregateData:
@@ -44,96 +44,40 @@ class AggregateData:
         self.aggregations_file = aggregations_file
         self.aggregations_folder = aggregations_folder
         self.table_name = table_name
-        
-        # Default trip parameters (will be overridden by config)
-        self.trip_gap_min = 10
-        self.trip_min_length_min = 1
-        
-        # Default date parameters (will be overridden by config)
-        self.start_date = datetime.today() - timedelta(days=1)
-        self.end_date = self.start_date        
         self.logger = logger
             
-        self.logger.info(f"Initialized AggregateData with cloud={cloud}, input_bucket={input_bucket}, output_bucket={output_bucket}")
-
     def load_aggregation_json(self):
-        """
-        Load aggregations JSON file from cloud storage or local disk
-        
-        Returns:
-            dict: The configuration from the aggregations.json file
-        """
-        config = None
-        
         try:
-            if self.cloud == "Local" and os.path.isdir(self.input_bucket):
-                file_path = os.path.join(self.input_bucket, self.aggregations_file)
-                if os.path.isfile(file_path):
-                    self.logger.info(f"Loading aggregation config from local file: {file_path}")
-                    with open(file_path, 'r') as file:
-                        config = json.load(file)
-                        self.logger.info(f"Data aggregation config loaded successfully")
-                else:
-                    self.logger.error(f"Aggregation file not found: {file_path}")
-                    return None
-            else:
-                # Create a temporary directory for file operations
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # Create download objects handler with temporary directory
-                    downloader = DownloadObjects(
-                        self.cloud,
-                        self.client,
-                        self.input_bucket,
-                        Path(temp_dir),
-                        self.logger
-                    )
-                    
-                    # Use download_json_file to get and parse the JSON in one step
-                    self.logger.info(f"Loading aggregation config from {self.input_bucket}/{self.aggregations_file}")
-                    config = downloader.download_json_file(self.aggregations_file)
-                    
-                    if not config:
-                        self.logger.error(f"Failed to download or parse aggregations file from {self.input_bucket}")
-                        return None
-                        
+            with tempfile.TemporaryDirectory() as temp_dir:
+                do = DownloadObjects(
+                    self.cloud,
+                    self.client,
+                    self.input_bucket,
+                    Path(temp_dir),
+                    "", 
+                    self.logger
+                )
+                
+                config = do.download_json_file(self.aggregations_file)
+                self.logger.info(f"Aggregation Configuration File: {config}")
+                self._extract_config_parameters(config)
+                
+                return config
+                
         except Exception as e:
             self.logger.error(f"Error loading JSON file: {e}")
             return None
-
-        if config:
-            # Extract clusters count from configuration
-            cluster_count = len(config.get('cluster_details', []))
-            self.logger.info(f"Data aggregation config loaded with {cluster_count} cluster details")
-            
-            # Extract date and trip parameters from configuration if they exist
-            self._extract_config_parameters(config)
-            
-            return config
-        else:
-            self.logger.error("Failed to load aggregation configuration")
-            return None
             
     def _extract_config_parameters(self, config):
-        """
-        Extract date and trip parameters from configuration
-        
-        Args:
-            config (dict): Configuration dictionary
-            
-        Raises:
-            ValueError: If the date configuration is invalid or missing required parameters
-        """
         # Extract trip parameters
         if 'config' in config and 'trip' in config['config']:
             trip_config = config['config']['trip']
             
             if 'trip_gap_min' in trip_config:
                 self.trip_gap_min = trip_config['trip_gap_min']
-                self.logger.info(f"Using trip gap minutes from config: {self.trip_gap_min}")
                 
             if 'trip_min_length_min' in trip_config:
                 self.trip_min_length_min = trip_config['trip_min_length_min']
-                self.logger.info(f"Using trip minimum length from config: {self.trip_min_length_min}")
     
         # Extract date parameters - ensure proper configuration is provided
         if not ('config' in config and 'date' in config['config']):
@@ -149,7 +93,6 @@ class AggregateData:
             # Use yesterday as the date range
             self.start_date = datetime.today() - timedelta(days=1)
             self.end_date = self.start_date
-            self.logger.info(f"Using previous day mode: {self.start_date.strftime('%Y-%m-%d')}")
         elif date_mode == 'specific_period':
             # Parse start_date and end_date from config - no defaults allowed
             if 'start_date' not in date_config:
@@ -171,105 +114,25 @@ class AggregateData:
                 # Validate date range
                 if self.end_date < self.start_date:
                     raise ValueError(f"Invalid date range: end_date {end_date_str} is before start_date {start_date_str}")
-                
-                self.logger.info(f"Using date range from config: {start_date_str} to {end_date_str}")
             except ValueError as e:
                 raise ValueError(f"Invalid date format in configuration. Dates must be in 'YYYY-MM-DD' format: {e}")
         else:
             raise ValueError(f"Unknown date mode: {date_mode}. Supported modes: 'previous_day', 'specific_period'")
 
-
-    def get_all_device_ids(self):
-        """
-        Extract all device IDs from the output bucket
-        
-        Returns:
-            list: List of device IDs
-        """
-        import re
-        
-        device_ids = []
-        
-        try:
-            # List objects in the output bucket to get all device IDs
-            result = list_objects(self.cloud, self.client, self.output_bucket, self.logger, prefix="")
-            
-            # Extract unique directory names at root level (device IDs)
-            paths = [obj["name"] for obj in result.get("objects", [])]
-            
-            # Find unique device ID prefixes (directories at root level)
-            for path in paths:
-                parts = path.strip("/").split("/")
-                if len(parts) >= 1:
-                    potential_id = parts[0]
-                    if re.match(r"^[0-9A-F]{8}$", potential_id) and potential_id not in device_ids:
-                        device_ids.append(potential_id)
-                        
-            self.logger.info(f"Found {len(device_ids)} device IDs in output bucket")
-            
-        except Exception as e:
-            self.logger.error(f"Error retrieving device IDs: {e}")
-            
-        return device_ids
-
     def list_parquet_files(self, prefix):
-        """
-        List Parquet files in the output bucket with the given prefix
-        
-        Args:
-            prefix (str): Prefix to filter the files by
-            
-        Returns:
-            list: List of Parquet file paths
-        """
         files = []
-        
         try:
-            if self.cloud == "Local":
-                # Extract device ID and date components from prefix
-                parts = prefix.replace('\\', '/').split('/')
-                device_id = parts[0]
-                date_path = '/'.join(parts[1:]) if len(parts) > 1 else ''
-                
-                device_dir = os.path.join(self.output_bucket, device_id)
-                if not os.path.exists(device_dir):
-                    # self.logger.info(f"--- Device directory not found: {device_dir}")
-                    return []
-                    
-                # Use a simple glob pattern with pathlib to find all matching parquet files
-                from pathlib import Path
-                parquet_files = Path(device_dir).glob(f"**/*{date_path}*/*.parquet")
-                files = [str(f.relative_to(self.output_bucket)).replace('\\', '/') for f in parquet_files]
-                
-                # self.logger.info(f"--- Found {len(files)} Parquet files for {prefix}")
-            else:
-                # For cloud storage, use list_objects
-                result = list_objects(self.cloud, self.client, self.output_bucket, self.logger, prefix=prefix)
-                
-                # Filter for Parquet files
-                files = [obj["name"] for obj in result.get("objects", []) if obj["name"].endswith(".parquet")]
+            result = list_objects_with_pagination(self.cloud, self.client, self.output_bucket, self.logger, prefix=prefix, supress=True)
+            files = [obj["name"] for obj in result.get("objects", []) if obj["name"].endswith(".parquet")]
         except Exception as e:
             self.logger.error(f"Error listing Parquet files: {e}")
         
         return files
 
     def get_parquet_files(self, files, temp_dir):
-        """
-        Download Parquet files from the output bucket to a temporary directory
-        
-        Args:
-            files (list): List of file paths to download
-            temp_dir (str): Temporary directory to store the files
-            
-        Returns:
-            list: List of local file paths
-        """
         local_files = []
-        
         for file_path in files:
             local_path = os.path.join(temp_dir, os.path.basename(file_path))
-            
-            # Use the cloud-agnostic download_object function from cloud_functions.py
             success = download_object(
                 self.cloud, 
                 self.client, 
@@ -287,16 +150,8 @@ class AggregateData:
                 
         return local_files
 
+    # Function for extracting trip windows
     def get_trip_windows(self, trip_path):
-        """
-        Identify trip windows based on time gaps in the data
-        
-        Args:
-            trip_path (str): Path prefix to directory containing Parquet files with trip data
-            
-        Returns:
-            list: List of trip windows (start and end timestamps)
-        """
         import pyarrow.parquet as pq
         
         try:
@@ -306,88 +161,56 @@ class AggregateData:
                 return []
                 
             # Download files and load into dataframes
-            with tempfile.TemporaryDirectory(prefix=f"temp_trips_{Path(trip_path).name}_") as temp_dir:
-                # Download files if needed
+            with tempfile.TemporaryDirectory() as temp_dir:
                 local_files = self.get_parquet_files(files, temp_dir)
                 if not local_files:
                     return []
                     
-                # Read all Parquet files and concatenate
                 dfs = [pq.read_table(f).to_pandas() for f in local_files]
                 if not dfs:
                     return []
                     
                 df = pd.concat(dfs, ignore_index=True)
             
-            # Look for TimeStamp or t column
-            time_col = None
-            if 'TimeStamp' in df.columns:
-                time_col = 'TimeStamp'
-            elif 't' in df.columns:
-                time_col = 't'
-            else:
-                self.logger.warning(f"No TimeStamp or t column in files from {trip_path}")
-                return []
-                
-            # Ensure datetime format
-            df[time_col] = pd.to_datetime(df[time_col])
-            
-            # Sort by time
-            df = df.sort_values(time_col)
-            
-            # Calculate time differences between consecutive rows
-            df['time_diff'] = df[time_col].diff()
-            
-            # Identify trip starts (rows where the time difference exceeds the gap threshold)
-            trip_starts = df[df['time_diff'] > pd.Timedelta(minutes=self.trip_gap_min)][time_col].tolist()
-            
-            # Always include the first timestamp as a trip start
-            if len(df) > 0 and df[time_col].iloc[0] not in trip_starts:
-                trip_starts.insert(0, df[time_col].iloc[0])
-                
-            # No trips found
-            if len(trip_starts) == 0:
-                return []
-                
+            df["t"] = pd.to_datetime(df["t"])
+            df["time_diff"] = df["t"].diff()
+
+            # Identify trip starts
+            trip_starts = df[df["time_diff"] > pd.Timedelta(minutes=self.trip_gap_min)][
+                "t"
+            ].tolist()
+            if df["t"].iloc[0] not in trip_starts:
+                trip_starts.insert(0, df["t"].iloc[0])
+
             # Identify trip ends
             trip_ends = []
-            
-            # For each trip start except the last one, find the last timestamp before the next trip starts
             for i in range(len(trip_starts) - 1):
                 # Find the last timestamp before the next trip starts
-                mask = df[time_col] < trip_starts[i + 1]
-                if mask.any():
-                    end_time = df[mask][time_col].iloc[-1]
-                    trip_ends.append(end_time)
-            
-            # The end of the last trip is the last timestamp in the data
-            if len(df) > 0:
-                trip_ends.append(df[time_col].iloc[-1])
-                
+                last_time_before_next_trip = df[df["t"] < trip_starts[i + 1]]["t"].iloc[-1]
+                trip_ends.append(last_time_before_next_trip)
+
+            # Handle the last trip end
+            trip_ends.append(df["t"].iloc[-1])
+
             # Filter out trips that are shorter than the minimum duration
             trip_windows = [
                 (start, end)
                 for start, end in zip(trip_starts, trip_ends)
                 if (end - start) >= pd.Timedelta(minutes=self.trip_min_length_min)
             ]
-            
-            self.logger.info(f"--- Found {len(trip_windows)} trip windows in {trip_path}")
+
             return trip_windows
             
         except Exception as e:
             # self.logger.error(f"--- Error identifying trip windows: {e}")
             return []
-
+   
+    # Function for creating a date range
     def daterange(self):
-        """
-        Generate a range of dates to process
-        
-        Returns:
-            generator: Generator yielding dates in the specified range
-        """
         for n in range((self.end_date - self.start_date).days + 1):
             yield self.start_date + timedelta(n)
-
+    
+    # Function for processing a single message for a trip
     def process_aggregation_for_trip(
         self,
         device_id,
@@ -398,21 +221,7 @@ class AggregateData:
         cluster_name,
         df
     ):
-        """
-        Process aggregation for a single trip window
-        
-        Args:
-            device_id (str): Device ID
-            message (str): Message name
-            signals (list): List of signals to aggregate
-            aggregation_types (list): List of aggregation types
-            trip_window (tuple): Start and end timestamps for the trip
-            cluster_name (str): Cluster name
-            df (DataFrame): DataFrame with data
-            
-        Returns:
-            list: List of aggregation results
-        """
+       
         start_time, end_time = trip_window
         
         # Determine which time column is present (t or TimeStamp)
@@ -447,29 +256,28 @@ class AggregateData:
                 
             # Calculate aggregations for this signal
             for agg_type in aggregation_types:
-                if agg_type == 'avg':
-                    value = trip_df[signal].mean()
-                elif agg_type == 'median':
-                    value = trip_df[signal].median()
-                elif agg_type == 'min':
-                    value = trip_df[signal].min()
-                elif agg_type == 'max':
-                    value = trip_df[signal].max()
-                elif agg_type == 'sum':
-                    value = trip_df[signal].sum()
-                elif agg_type == 'count':
-                    value = len(trip_df)
-                elif agg_type == 'first':
-                    value = trip_df[signal].iloc[0] if len(trip_df) > 0 else None
-                elif agg_type == 'last':
-                    value = trip_df[signal].iloc[-1] if len(trip_df) > 0 else None
-                elif agg_type == 'delta_sum':
-                    value = trip_df[signal].diff().sum()
-                elif agg_type == 'delta_sum_pos':
-                    delta = trip_df[signal].diff()
+                value = None
+                if agg_type == "avg":
+                    value = df[signal].mean()
+                elif agg_type == "median":
+                    value = df[signal].median()
+                elif agg_type == "max":
+                    value = df[signal].max()
+                elif agg_type == "min":
+                    value = df[signal].min()
+                elif agg_type == "sum":
+                    value = df[signal].sum()
+                elif agg_type == "first":
+                    value = df[signal].iloc[0]
+                elif agg_type == "last":
+                    value = df[signal].iloc[-1]
+                elif agg_type == "delta_sum":
+                    value = df[signal].diff().sum()
+                elif agg_type == "delta_sum_pos":
+                    delta = df[signal].diff()
                     value = delta[delta > 0].sum()
-                elif agg_type == 'delta_sum_neg':
-                    delta = trip_df[signal].diff()
+                elif agg_type == "delta_sum_neg":
+                    delta = df[signal].diff()
                     value = delta[delta < 0].sum()
                 else:
                     self.logger.warning(f"Unsupported aggregation type: {agg_type}")
@@ -568,7 +376,7 @@ class AggregateData:
                 
                 # Write the file using PyArrow
                 pq.write_table(pa.Table.from_pandas(df, schema=schema), file_path)
-                self.logger.info(f"Stored aggregation Parquet locally | {len(results)} rows | {file_path}")
+                self.logger.info(f"- Stored aggregation Parquet locally | {len(results)} rows | {file_path}")
                 return True
                 
             else:
@@ -713,7 +521,7 @@ class AggregateData:
             
         return device_results
 
-    def process_data_lake(self, config=None):
+    def process_data_lake(self):
         """
         Process the data lake for all configured devices
         
@@ -723,10 +531,10 @@ class AggregateData:
         Returns:
             int: Number of days with data processed
         """
-        if not config:
-            config = self.load_aggregation_json()
-            
-        if not config:
+        
+        config = self.load_aggregation_json()
+      
+        if not config or config == []:
             self.logger.error("No valid configuration to process")
             return 0
             

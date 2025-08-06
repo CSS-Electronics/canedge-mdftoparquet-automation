@@ -253,7 +253,7 @@ def upload_object(cloud, client, bucket, object_path, local_path, logger):
         return False
 
 
-def list_objects(cloud, client, bucket, logger, prefix=""):
+def list_objects(cloud, client, bucket, logger, prefix="", supress=False):
     """
     List objects in a cloud storage bucket.
     
@@ -271,7 +271,8 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
     if cloud == "Amazon":
         try:
             response = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-            logger.info(f"Listed objects in {bucket} with prefix {prefix}")
+            if supress == False:
+                logger.info(f"Listed objects in {bucket} with prefix {prefix}")
             
             # Convert AWS-specific response to standardized format
             result = []
@@ -295,7 +296,8 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
                     "last_modified": blob.updated
                 })
                 
-            logger.info(f"Listed objects in GCP bucket {bucket} with prefix {prefix}")
+            if supress == False:
+                logger.info(f"Listed objects in GCP bucket {bucket} with prefix {prefix}")
             return {"objects": result}
         except Exception as e:
             logger.error(f"Failed to list objects in GCP bucket {bucket} with prefix {prefix}: {e}")
@@ -312,7 +314,8 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
                     "last_modified": blob.last_modified
                 })
             
-            logger.info(f"Listed objects in Azure container {bucket} with prefix {prefix}")
+            if supress == False:
+                logger.info(f"Listed objects in Azure container {bucket} with prefix {prefix}")
             return {"objects": result}
         except Exception as e:
             logger.error(f"Failed to list objects in Azure container {bucket} with prefix {prefix}: {e}")
@@ -341,7 +344,7 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
                             "last_modified": file_path.stat().st_mtime
                         })
                         
-            if logger:
+            if logger and supress == False:
                 logger.info(f'Listed {len(response["objects"])} objects in {bucket} with prefix {prefix}')
             return response
             
@@ -353,7 +356,7 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
         return {"objects": []}
 
 
-def list_objects_with_pagination(cloud, client, bucket, logger, prefix=""):
+def list_objects_with_pagination(cloud, client, bucket, logger, prefix="", supress=False):
     """
     List objects in a cloud storage bucket with pagination support for >1000 objects.
     
@@ -477,7 +480,7 @@ def list_objects_with_pagination(cloud, client, bucket, logger, prefix=""):
         try:
             # For Local storage, just use the regular list_objects function
             # as pagination isn't typically needed for local filesystem operations
-            return list_objects(cloud, client, bucket, logger, prefix)
+            return list_objects(cloud, client, bucket, logger, prefix, supress)
         except Exception as e:
             logger.error(f"Failed to list objects in {bucket} with prefix {prefix}: {e}")
             return {"objects": []}

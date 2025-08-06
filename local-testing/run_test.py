@@ -206,24 +206,12 @@ def process_aggregation(cloud, input_bucket):
     if not os.path.exists(agg_script_path):
         logger.error(f"Aggregation script not found at {agg_script_path}")
         return False
-        
-    # Execute the aggregation script
-    try:
-        logger.info(f"Executing: {sys.executable} {agg_script_path}")
-        result = subprocess.run([sys.executable, agg_script_path])
-        
-        if result.returncode == 0:
-            logger.info("\n\u2705 Local aggregation test completed successfully\n")
-            return True
-        else:
-            if result.stderr.strip():
-                logger.error(f"Aggregation script error output:\n{result.stderr}")
-            logger.error(f"Aggregation script failed with return code {result.returncode}")
-            logger.error("\n\u274c Test failed\n")
-            return False
-    except Exception as e:
-        logger.error(f"Error executing aggregation script: {e}")
-        logger.error("\n\u274c Test failed\n")
+    
+    result = subprocess.run([sys.executable, agg_script_path])
+    
+    if result.returncode == 0:
+        return True 
+    else:
         return False
 
 
@@ -321,7 +309,7 @@ def main():
         process_backlog_flag=args.backlog,
         decoder_path=args.decoder
     )
-    
+        
     # Report results
     if result:
         logger.info("\n\n✅ Test completed successfully\n")
