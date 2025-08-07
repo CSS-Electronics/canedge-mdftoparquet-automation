@@ -1,7 +1,6 @@
-# Multi-Cloud MDF to Parquet Automation
+# CANedge MDF to Parquet Automation
 
-This repository contains cloud functions for automatically decoding CANedge MDF log files to Parquet files across Amazon AWS, Google Cloud, and Microsoft Azure platforms. These functions are triggered when new MDF files are uploaded to a cloud storage bucket, process them using DBC decoding, and store the results in Parquet format in an output bucket. Further, the repository includes code for performing backlog processing and Parquet data lake trip summary aggregation.
-
+This repository contains cloud functions for automatically decoding CANedge MDF log files to Parquet files **locally**, as well as on **Amazon AWS**, **Google Cloud** and **Azure** platforms. These functions are triggered when new MDF files are uploaded to a cloud storage bucket, process them using DBC decoding, and store the results in Parquet format in an output bucket. Further, the repository includes code for performing backlog processing and Parquet data lake trip summary aggregation.
 
 > [!NOTE]  
 > See the [CANedge Intro](https://www.csselectronics.com/pages/can-bus-hardware-software-docs) (Process/MF4 decoders) for cloud-specific deployment guidance
@@ -74,46 +73,11 @@ These credential files are used during local testing and should contain the nece
 
 ### Credentials Format
 
-Each cloud provider requires a specific credential file format:
+Each cloud provider requires a specific credential file format - see the `json-examples/creds-examples/` folder for the cloud specific structures. Below we outline how you can populate each of these when you've deployed the cloud specific automation workflow as per the CANedge Intro:
 
-1. **Amazon AWS (`amazon-creds.json`):**
-```json
-{
-    "AWS_ACCESS_KEY_ID": "AKIAXXXXXXXXXXXXXXXX",
-    "AWS_SECRET_ACCESS_KEY": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "AWS_DEFAULT_REGION": "eu-central-1"
-}
-```
-
-2. **Microsoft Azure (`azure-creds.json`):**
-```json
-{
-    "STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=yourstorageaccount;AccountKey=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;EndpointSuffix=core.windows.net"
-}
-```
-
-3. **Google Cloud (`google-creds.json`):**
-```json
-{
-    "type": "service_account",
-    "project_id": "your-project-id",
-    "private_key_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "private_key": "-----BEGIN PRIVATE KEY-----\nxxx...xxx\n-----END PRIVATE KEY-----\n",
-    "client_email": "service-account-name@your-project-id.iam.gserviceaccount.com",
-    "client_id": "123456789012345678901",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/service-account-name%40your-project-id.iam.gserviceaccount.com",
-    "universe_domain": "googleapis.com"
-}
-```
-
-#### How to Find Credential Information
-
-- **Google credentials**: The service account key can be found in your input bucket and is named `<id>-service-account-key.json`
-- **Amazon credentials**: The access information can be found in the CloudFormation stack outputs (at the bottom of the outputs)
-- **Azure credentials**: The storage connection string can be found in the Azure Function/Settings/Environment variables under `StorageConnectionString`
+- **Google credentials**: This can be found in your input bucket (named `<id>-service-account-key.json`)
+- **Amazon credentials**: This can be found in the CloudFormation stack outputs (at the bottom)
+- **Azure credentials**: This can be found in the Azure Function/Settings/Environment variables
 
 ---------
 
@@ -128,20 +92,18 @@ The repository includes several scripts and batch files in the `local-testing/` 
 
 Advanced functionality for the automation integration relies on uploading specific JSON files to the input bucket:
 
-- **Custom Messages**: Define custom calculated signals via `custom-messages.json` (and updating `modules/custom_message_functions.py`)
+- **Custom Messages**: Define custom calculated signals via `custom-messages.json` 
 - **Event Detection**: Configure event detection via `events.json` 
 - **Device-Specific DBC**: Configure device-specific DBC decoding via `dbc-groups.json`
 - **Decryption**: Decrypt `MFE`, `MFM` files via `passwords.json` 
 
-The `json-examples/` folder contains examples showing the structure of the above files. 
+The `json-examples/` folder contains examples showing the structure of the above files. Details on these topics can be found in the CANedge Intro.
 
 ---------
 
 ## Backlog Processing
 
-To process a large number of MDF files efficiently, backlog processing scripts are provided for each cloud provider and local environments. These scripts read a `backlog.json` file from the root of the input bucket/folder, which contains a list of MDF files to process.
-
-You can test this locally via the `--backlog` flag:
+To process a large number of MDF files efficiently, backlog processing scripts are provided for each cloud provider and local environments. These scripts read a `backlog.json` file from the root of the input bucket/folder, which contains a list of MDF files to process. You can test this locally via the `--backlog` flag:
 
 ```bash
 python local-testing/run_test.py \
@@ -186,9 +148,7 @@ You can specify three types of entries in the backlog file:
 
 ## Aggregation Processing
 
-The repository includes functionality for aggregating Parquet data into trip summaries across all cloud providers. These scripts read an `aggregations.json` file from the root of the input bucket, which defines how Parquet data should be aggregated into trips. 
-
-You can test this locally via the `--aggregate` flag:
+The repository includes functionality for aggregating Parquet data into trip summaries across all cloud providers. These scripts read an `aggregations.json` file from the root of the input bucket, which defines how Parquet data should be aggregated into trips. You can test this locally via the `--aggregate` flag:
 
 ```bash
 python local-testing/run_test.py \
@@ -272,11 +232,7 @@ The aggregations.json file defines how to identify and process trips in the Parq
 
 ### Preparing Deployment Packages
 
-The repository includes a script to generate deployment ZIP files, scripts and containers for the various cloud platforms:
-
-### Deployment to Cloud Platforms
-
-For details on deploying the cloud functions, see the CANedge Intro.
+The repository includes a script to generate deployment ZIP files, scripts and containers for the various cloud platforms. These are primarily designed for developer use or by CSS Electronics for updating deployment stacks. For details on deploying the cloud functions as a CANedge end user, see the CANedge Intro.
 
 ---------
 
