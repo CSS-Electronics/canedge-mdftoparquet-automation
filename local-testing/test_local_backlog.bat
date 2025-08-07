@@ -12,4 +12,6 @@ set PYTHONPATH=%~dp0..;%PYTHONPATH%
 python run_test.py --cloud Local --input-bucket "%~dp0local-input-bucket" --backlog
 
 echo Test complete
-pause
+echo.
+echo Press any key to exit...
+pause > nul

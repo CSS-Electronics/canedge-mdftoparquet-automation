@@ -1,5 +1,3 @@
-# MF4 decoder version: v24.12.19
-# Function script version: 3.0.1
 import os
 import logging
 import azure.functions as func
@@ -18,7 +16,7 @@ bucket_input = os.getenv("INPUT_BUCKET")
 cloud = "Azure"
 bucket_output = bucket_input + "-parquet"
 storage_client = BlobServiceClient.from_connection_string(storage_connection_string)
-notification_client = None
+notification_client = True # events published via logging functionality
 
 app = func.FunctionApp()
 

@@ -1,6 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Enable error handling
+set "ERROR_OCCURRED=0"
+
 echo Starting MDF to Parquet zip file preparation...
 echo.
 
@@ -28,8 +31,8 @@ set "REPO_ROOT=.."
 set "OUTPUT_DIR=%REPO_ROOT%\release"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-:: Read versions from the config file
-set "VERSION_FILE=mdftoparquet-versions.cfg"
+:: Read versions from the root config file
+set "VERSION_FILE=%REPO_ROOT%\versions.cfg"
 if not exist "%VERSION_FILE%" (
     echo Error: %VERSION_FILE% not found.
     exit /b 1
@@ -66,10 +69,44 @@ set "AMAZON_BUILD_DIR=%TEMP_DIR%\amazon"
 mkdir "%AMAZON_BUILD_DIR%"
 mkdir "%AMAZON_BUILD_DIR%\modules"
 
-:: Copy files for Amazon Lambda
+:: Check required files for Amazon Lambda
+echo Checking required files for Amazon Lambda...
+
+:: Check for lambda_function.py
+if not exist lambda_function.py (
+    echo ERROR: Required file lambda_function.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for process_backlog_amazon.py
+if not exist "%REPO_ROOT%\mdftoparquet-backlog\process_backlog_amazon.py" (
+    echo ERROR: Required file process_backlog_amazon.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for process_aggregation_amazon.py
+if not exist "%REPO_ROOT%\aggregation\process_aggregation_amazon.py" (
+    echo ERROR: Required file process_aggregation_amazon.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for decoder executable
+if not exist "%REPO_ROOT%\mdf2parquet_decode" (
+    echo ERROR: Required file mdf2parquet_decode not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy files for Amazon Lambda after all checks have passed
+echo Copying Amazon Lambda files...
 copy lambda_function.py "%AMAZON_BUILD_DIR%\"
 :: Add the process_backlog_amazon.py script from mdftoparquet-backlog folder
 copy "%REPO_ROOT%\mdftoparquet-backlog\process_backlog_amazon.py" "%AMAZON_BUILD_DIR%\"
+:: Add the process_aggregation_amazon.py script from aggregation folder
+copy "%REPO_ROOT%\aggregation\process_aggregation_amazon.py" "%AMAZON_BUILD_DIR%\"
 :: Use the Linux version of the decoder for cloud environments
 copy "%REPO_ROOT%\mdf2parquet_decode" "%AMAZON_BUILD_DIR%\"
 :: Copy modules excluding __pycache__ folders
@@ -97,11 +134,36 @@ set "GOOGLE_BUILD_DIR=%TEMP_DIR%\google"
 mkdir "%GOOGLE_BUILD_DIR%"
 mkdir "%GOOGLE_BUILD_DIR%\modules"
 
-:: Copy files for Google Cloud Function
+:: Check required files for Google Cloud Function
+echo Checking required files for Google Cloud Function...
+
+:: Check for main.py
+if not exist main.py (
+    echo ERROR: Required file main.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for decoder executable
+if not exist "%REPO_ROOT%\mdf2parquet_decode" (
+    echo ERROR: Required file mdf2parquet_decode not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for Google requirements file
+if not exist google-function-root\requirements.txt (
+    echo ERROR: Required file google-function-root\requirements.txt not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy files for Google Cloud Function after all checks have passed
+echo Copying Google Cloud Function files...
 copy main.py "%GOOGLE_BUILD_DIR%\"
 :: Use the Linux version of the decoder for cloud environments
 copy "%REPO_ROOT%\mdf2parquet_decode" "%GOOGLE_BUILD_DIR%\"
-if exist google-function-root\requirements.txt copy google-function-root\requirements.txt "%GOOGLE_BUILD_DIR%\"
+copy google-function-root\requirements.txt "%GOOGLE_BUILD_DIR%\"
 :: Copy modules excluding __pycache__ folders
 for /D %%d in ("%REPO_ROOT%\modules\*") do (
     set "folder=%%~nxd"
@@ -127,16 +189,49 @@ set "AZURE_BUILD_DIR=%TEMP_DIR%\azure"
 mkdir "%AZURE_BUILD_DIR%"
 mkdir "%AZURE_BUILD_DIR%\modules"
 
+:: Return to the mdftoparquet directory to ensure proper paths
+cd %~dp0
+
 :: Copy files for Azure Function
+echo Checking required files for Azure function...
+
+:: Check for function_app.py
+if not exist function_app.py (
+    echo ERROR: Required file function_app.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for decoder executable
+if not exist "%REPO_ROOT%\mdf2parquet_decode" (
+    echo ERROR: Required file mdf2parquet_decode not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for azure function configuration directory
+if not exist "%~dp0azure-function-root" (
+    echo ERROR: Required directory azure-function-root not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Check for required files in azure-function-root
+if not exist "%~dp0azure-function-root\host.json" (
+    echo ERROR: Required file azure-function-root\host.json not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy files for Azure Function after all checks have passed
+echo Copying Azure function files...
 copy function_app.py "%AZURE_BUILD_DIR%\"
 :: Use the Linux version of the decoder for cloud environments
 copy "%REPO_ROOT%\mdf2parquet_decode" "%AZURE_BUILD_DIR%\"
 
 :: Copy Azure function root files
-if exist azure-function-root (xcopy /E /I /Y "azure-function-root\*" "%AZURE_BUILD_DIR%\")
-:: Make sure we have these files from somewhere
-copy host.json "%AZURE_BUILD_DIR%\" 2>NUL
-copy local.settings.json "%AZURE_BUILD_DIR%\" 2>NUL
+echo Copying Azure function root files from azure-function-root...
+xcopy /E /I /Y "%~dp0azure-function-root\*" "%AZURE_BUILD_DIR%\"
 :: Copy modules excluding __pycache__ folders
 for /D %%d in ("%REPO_ROOT%\modules\*") do (
     set "folder=%%~nxd"
@@ -148,9 +243,10 @@ xcopy /Y "%REPO_ROOT%\modules\*.py" "%AZURE_BUILD_DIR%\modules\"
 
 :: Create the zip file
 set "AZURE_ZIP_NAME=mdf-to-parquet-azure-function-v%AZURE_VERSION%.zip"
+echo Creating Azure Function zip file...
 cd "%AZURE_BUILD_DIR%"
 "%SEVENZIP_PATH%" a -tzip -mx=5 "..\..\%OUTPUT_DIR%\%AZURE_ZIP_NAME%" *
-cd ..\..\
+cd "%~dp0"
 echo Azure Function zip created: %OUTPUT_DIR%\%AZURE_ZIP_NAME%
 echo.
 

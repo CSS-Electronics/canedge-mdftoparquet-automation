@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-MDF to Parquet Local Test Runner
+MDF to Parquet and Aggregation Local Test Runner
 
-This script provides functionality for testing MDF to Parquet conversion locally for
-different cloud providers (Amazon, Azure, Google). It handles both single file processing
-and backlog processing scenarios.
+This script provides functionality for testing MDF to Parquet conversion and aggregation locally for
+different cloud providers (Amazon, Azure, Google). It handles single file processing,
+backlog processing, and data aggregation scenarios.
+
+For aggregation tests, all date parameters and trip configuration are read from the aggregations.json
+file located in the input bucket directory.
 
 Usage examples:
   Single object test: python run_test.py --cloud Amazon --input-bucket test-bucket --object-path myfile.MF4
   Backlog test:      python run_test.py --cloud Amazon --input-bucket test-bucket --backlog
+  Aggregation test:  python run_test.py --cloud Amazon --input-bucket test-bucket --aggregate
 """
 
 import os
@@ -16,6 +20,7 @@ import sys
 import argparse
 import logging
 import subprocess
+from datetime import datetime, timedelta
 from utils_testing import load_creds_file_into_env, create_cloud_event
 
 # Configure logging
@@ -60,6 +65,11 @@ def setup_environment(cloud, input_bucket, decoder_path=None):
     if not input_bucket:
         logger.error("No input bucket specified. This is required.")
         return None
+        
+    # For Azure specifically, rename the connection string env var to match what container script expects
+    if cloud == "Azure" and os.environ.get("AZURE_STORAGE_CONNECTION_STRING"):
+        os.environ["StorageConnectionString"] = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+        logger.info("Azure storage connection string mapped to StorageConnectionString")
     
     # Set output bucket based on input bucket if not already in environment
     output_bucket = os.environ.get('OUTPUT_BUCKET')
@@ -148,7 +158,15 @@ def process_backlog(cloud, input_bucket):
         bool: True if the backlog processing executed successfully, False otherwise
     """
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    backlog_script_path = os.path.join(repo_root, "mdftoparquet-backlog", f"process_backlog_{cloud.lower()}.py")
+    
+    # For Azure, use the container script (process_backlog_container.py)
+    if cloud == "Azure":
+        backlog_script_path = os.path.join(repo_root, "mdftoparquet-backlog", "process_backlog_container.py")
+        # Set the CLOUD environment variable for the container script
+        os.environ["CLOUD"] = "Azure"
+    else:
+        # For other cloud providers, use their specific scripts
+        backlog_script_path = os.path.join(repo_root, "mdftoparquet-backlog", f"process_backlog_{cloud.lower()}.py")
     
     logger.info(f"Processing backlog using {backlog_script_path}")
     
@@ -171,14 +189,70 @@ def process_backlog(cloud, input_bucket):
         logger.error(f"Unexpected error: {e}")
         return False
         
-def run_test(cloud, input_bucket, process_backlog_flag=False, object_path=None, decoder_path=None):
-    """Run the appropriate test based on the arguments
+def process_aggregation(cloud, input_bucket):
+    """Execute data aggregation for the specified cloud provider
     
     Args:
         cloud: Cloud provider (Amazon, Azure, Google, Local)
         input_bucket: Name of the input bucket/container
-        process_backlog_flag: Whether to process a backlog file
-        object_path: Path to the object for single file tests
+        
+    Returns:
+        bool: True if the aggregation executed successfully, False otherwise
+    """
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Use the appropriate script based on the cloud provider
+    if cloud == "Local":
+        script_name = "process_aggregation_local.py"
+    elif cloud == "Google":
+        script_name = "process_aggregation_google.py"
+    elif cloud == "Amazon":
+        script_name = "process_aggregation_amazon.py"
+    elif cloud == "Azure":
+        script_name = "process_aggregation_container.py"
+    else:
+        logger.error(f"Unsupported cloud provider: {cloud}")
+        return False
+    
+    agg_script_path = os.path.join(repo_root, "aggregation", script_name)
+    
+    # Check if the aggregation script exists
+    if not os.path.exists(agg_script_path):
+        logger.error(f"Aggregation script not found at {agg_script_path}")
+        return False
+    
+    # Set up environment variables for cloud providers
+    env = os.environ.copy()
+    if cloud in ["Google", "Amazon", "Azure"]:
+        env["INPUT_BUCKET"] = input_bucket
+        
+    # For the container script, we need to explicitly set the CLOUD environment variable
+    if cloud == "Azure":
+        env["CLOUD"] = "Azure"
+    
+    # Execute the aggregation script
+    logger.info(f"Running aggregation script: {agg_script_path}")
+    result = subprocess.run([sys.executable, agg_script_path], env=env)
+    
+    if result.returncode == 0:
+        logger.info(f"Aggregation for {cloud} completed successfully")
+        return True
+    else:
+        logger.error(f"Aggregation for {cloud} failed with return code {result.returncode}")
+        return False
+
+
+def run_test(cloud, input_bucket, object_path=None, aggregate_flag=False, process_backlog_flag=False, 
+          decoder_path=None):
+    """
+    Run the appropriate test based on the flags
+    
+    Args:
+        cloud: Cloud provider (Amazon, Azure, Google, Local)
+        input_bucket: Name of the input bucket/container
+        object_path: Path to the object to process (for single file test)
+        aggregate_flag: Flag to run aggregation test
+        process_backlog_flag: Flag to run backlog test
         decoder_path: Path to the MF4 decoder executable
         
     Returns:
@@ -187,8 +261,12 @@ def run_test(cloud, input_bucket, process_backlog_flag=False, object_path=None, 
     # Set up the environment for testing
     if not setup_environment(cloud, input_bucket, decoder_path):
         return False
-        
-    if process_backlog_flag:
+    
+    if aggregate_flag:
+        # Process aggregation for the specified cloud provider
+        logger.info(f"Processing aggregation for {cloud} from bucket: {input_bucket}")
+        return process_aggregation(cloud, input_bucket)
+    elif process_backlog_flag:
         # Process backlog for the specified cloud provider
         logger.info(f"Processing backlog for {cloud} from bucket: {input_bucket}")
         return process_backlog(cloud, input_bucket)
@@ -208,7 +286,7 @@ def main():
     Parse command-line arguments and run the appropriate test
     """
     parser = argparse.ArgumentParser(
-        description='Run local tests for cloud functions using either a single object or a backlog file',
+        description='Run local tests for cloud functions using either a single object, a backlog file, or aggregation',
         formatter_class=argparse.RawTextHelpFormatter
     )
     
@@ -221,13 +299,20 @@ def main():
                         required=True,
                         help='Input bucket/container name (required for all operations)')
                         
-    parser.add_argument('-b', '--backlog', 
+    # Create mutually exclusive group for operation type
+    operation_group = parser.add_mutually_exclusive_group()
+                        
+    operation_group.add_argument('-b', '--backlog', 
                         action='store_true',
                         help='Process backlog.json from the cloud storage input bucket')
+    
+    operation_group.add_argument('-a', '--aggregate',
+                        action='store_true',
+                        help='Run data aggregation using the AggregateData class')
                         
     parser.add_argument('-o', '--object-path', 
                         default='',
-                        help='Object path to use for single file testing (required when --backlog is not provided)')
+                        help='Object path to use for single file testing (required when neither --backlog nor --aggregate is provided)')
                         
     parser.add_argument('-d', '--decoder', 
                         default='mdf2parquet_decode.exe',
@@ -236,20 +321,22 @@ def main():
     args = parser.parse_args()
     
     # Validate arguments
-    if not args.backlog and not args.object_path:
-        parser.error('--object-path is required when not using --backlog')
+    if not args.backlog and not args.aggregate and not args.object_path:
+        parser.error('--object-path is required when neither --backlog nor --aggregate is provided')
     
     # Run the test
-    logger.info(f"\nRunning local function test for {args.cloud}\n")
+    test_type = "aggregation" if args.aggregate else "backlog" if args.backlog else "single file"
+    logger.info(f"\nRunning local {test_type} test for {args.cloud}\n")
     
     result = run_test(
         cloud=args.cloud,
         input_bucket=args.input_bucket,
-        process_backlog_flag=args.backlog,
         object_path=args.object_path,
+        aggregate_flag=args.aggregate,
+        process_backlog_flag=args.backlog,
         decoder_path=args.decoder
     )
-    
+        
     # Report results
     if result:
         logger.info("\n\n✅ Test completed successfully\n")

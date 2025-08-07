@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Amazon S3 Backlog Processing Entry Script for AWS Glue Spark
+Amazon S3 Aggregation Entry Script for AWS Glue Spark
 
-This script serves as the entry point for AWS Glue Spark jobs (version 5.0 with Python 3.11) to process MDF files to Parquet format.
+This script serves as the entry point for AWS Glue Spark jobs (version 5.0 with Python 3.11) to aggregate Parquet files to trip summary level.
 It downloads the Lambda function ZIP archive containing the actual processing script and required modules,
-extracts it to a secure temporary directory, and then executes the main backlog processing script.
+extracts it to a secure temporary directory, and then executes the main aggregation script.
 
 Required job parameters:
 - input_bucket: S3 bucket containing the MDF files to process
 - lambda_zip_name: Name of the Lambda ZIP file in the INPUT_BUCKET to download and extract
-- decoder: Name of the MF4 decoder executable (e.g., 'mdf2parquet_decode')
 """
 # Standard imports
 import os
@@ -25,23 +24,20 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger()
  
 def process():
-    logger.info(f"PREPARING FOR BACKLOG PROCESSING\n\n")
+    logger.info(f"PREPARING FOR AGGREGATION\n\n")
     # extract parameters depending on environment and run job
     try:
         if 'GLUE_PYTHON_VERSION' in os.environ:
             from awsglue.utils import getResolvedOptions
-            args = getResolvedOptions(sys.argv, ['input_bucket', 'lambda_zip_name', 'decoder'])
+            args = getResolvedOptions(sys.argv, ['input_bucket', 'lambda_zip_name'])
             input_bucket = args['input_bucket']
             lambda_zip_name = args['lambda_zip_name']
-            decoder_name = args['decoder']
         else:
             input_bucket = os.environ.get("INPUT_BUCKET", "test-bucket")
             lambda_zip_name = os.environ.get("LAMBDA_ZIP_NAME", "test_lambda.zip")
-            decoder_name = os.environ.get("MF4_DECODER", "mock_decoder.exe")
         
         logger.info(f"Input bucket: {input_bucket}")
         logger.info(f"Lambda ZIP name: {lambda_zip_name}")
-        logger.info(f"Decoder name: {decoder_name}")
         
         # Create a secure temporary directory for our operations using context manager
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -64,23 +60,17 @@ def process():
             with zipfile.ZipFile(local_zip, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            # Set up environment variables for the backlog script
+            # Set up environment variables for the aggregation script
             os.environ["INPUT_BUCKET"] = input_bucket
-            decoder_path = Path(extract_dir) / decoder_name
-            os.environ["MF4_DECODER"] = str(decoder_path)
-            
-            # Make decoder executable if on Linux
-            if not os.name == 'nt':  
-                decoder_path.chmod(decoder_path.stat().st_mode | 0o111)  
                             
-            # Run the backlog processing script directly using subprocess
-            logger.info("STARTING BACKLOG PROCESSING")
-            script_path = Path(extract_dir) / "process_backlog_amazon.py"
+            # Run the aggregation script directly using subprocess
+            logger.info("STARTING AGGREGATION")
+            script_path = Path(extract_dir) / "process_aggregation_amazon.py"
             result = subprocess.run([sys.executable, str(script_path)], cwd=str(extract_dir))
             
             return result.returncode
     except Exception as e:
-        logger.error(f"Error in backlog processing entry script: {str(e)}", exc_info=True)
+        logger.error(f"Error in aggregation entry script: {str(e)}", exc_info=True)
         return 1
 
 if __name__ == "__main__":

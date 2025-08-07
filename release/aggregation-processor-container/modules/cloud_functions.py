@@ -83,7 +83,7 @@ def normalize_object_path(path):
     path_str = str(path) if not isinstance(path, str) else path
     return path_str.replace('\\', '/')
 
-def download_object(cloud, client, bucket, object_path, local_path, logger):
+def download_object(cloud, client, bucket, object_path, local_path, logger, supress=False):
     """
     Download an object from a cloud storage bucket to a local file.
     
@@ -109,7 +109,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
         try:
             # Download the object from S3
             client.download_file(bucket, object_path, local_path)
-            if logger:
+            if logger and supress == False:
                 logger.info(f"Successfully downloaded {object_path} from {bucket} to {local_path}")
             return True
         except Exception as e:
@@ -129,7 +129,8 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
             # Download the blob
             blob.download_to_filename(str(local_path))
             
-            logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
+            if supress == False:
+                logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
             return True
         except Exception as e:
             logger.info(f"Failed to download {bucket}/{object_path}")
@@ -145,8 +146,9 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
             with open(str(local_path), "wb") as file:
                 download_stream = blob_client.download_blob()
                 file.write(download_stream.readall())
-                
-            logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
+            
+            if supress == False:
+                logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
             return True
         except Exception as e:
             logger.info(f"Failed to download {bucket}/{object_path}")
@@ -164,7 +166,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger):
             # Copy the file
             shutil.copy2(source_path, local_path)
             
-            if logger:
+            if logger and supress == False:
                 logger.info(f"Copied {object_path} from Local storage: {bucket} to {local_path}")
             return True
         except Exception as e:
@@ -251,7 +253,7 @@ def upload_object(cloud, client, bucket, object_path, local_path, logger):
         return False
 
 
-def list_objects(cloud, client, bucket, logger, prefix=""):
+def list_objects(cloud, client, bucket, logger, prefix="", supress=False):
     """
     List objects in a cloud storage bucket.
     
@@ -269,7 +271,8 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
     if cloud == "Amazon":
         try:
             response = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-            logger.info(f"Listed objects in {bucket} with prefix {prefix}")
+            if supress == False:
+                logger.info(f"Listed objects in {bucket} with prefix {prefix}")
             
             # Convert AWS-specific response to standardized format
             result = []
@@ -293,7 +296,8 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
                     "last_modified": blob.updated
                 })
                 
-            logger.info(f"Listed objects in GCP bucket {bucket} with prefix {prefix}")
+            if supress == False:
+                logger.info(f"Listed objects in GCP bucket {bucket} with prefix {prefix}")
             return {"objects": result}
         except Exception as e:
             logger.error(f"Failed to list objects in GCP bucket {bucket} with prefix {prefix}: {e}")
@@ -310,7 +314,8 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
                     "last_modified": blob.last_modified
                 })
             
-            logger.info(f"Listed objects in Azure container {bucket} with prefix {prefix}")
+            if supress == False:
+                logger.info(f"Listed objects in Azure container {bucket} with prefix {prefix}")
             return {"objects": result}
         except Exception as e:
             logger.error(f"Failed to list objects in Azure container {bucket} with prefix {prefix}: {e}")
@@ -339,7 +344,7 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
                             "last_modified": file_path.stat().st_mtime
                         })
                         
-            if logger:
+            if logger and supress == False:
                 logger.info(f'Listed {len(response["objects"])} objects in {bucket} with prefix {prefix}')
             return response
             
@@ -351,7 +356,7 @@ def list_objects(cloud, client, bucket, logger, prefix=""):
         return {"objects": []}
 
 
-def list_objects_with_pagination(cloud, client, bucket, logger, prefix=""):
+def list_objects_with_pagination(cloud, client, bucket, logger, prefix="", supress=False):
     """
     List objects in a cloud storage bucket with pagination support for >1000 objects.
     
@@ -475,7 +480,7 @@ def list_objects_with_pagination(cloud, client, bucket, logger, prefix=""):
         try:
             # For Local storage, just use the regular list_objects function
             # as pagination isn't typically needed for local filesystem operations
-            return list_objects(cloud, client, bucket, logger, prefix)
+            return list_objects(cloud, client, bucket, logger, prefix, supress)
         except Exception as e:
             logger.error(f"Failed to list objects in {bucket} with prefix {prefix}: {e}")
             return {"objects": []}

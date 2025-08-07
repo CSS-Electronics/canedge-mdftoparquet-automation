@@ -43,22 +43,23 @@ class MockS3Client:
         
         # Create a dummy zip file with test content
         with zipfile.ZipFile(filename, 'w') as zip_file:
-            # Create a more realistic process_backlog_amazon.py file that includes the run_backlog_processing function
+            # Create a more realistic process_backlog_amazon.py file that matches our updated API
             zip_file.writestr('process_backlog_amazon.py', 
                              '#!/usr/bin/env python3\n'
                              'import os\n'
                              'import sys\n'
                              'import logging\n\n'
+                             'logging.basicConfig(level=logging.INFO)\n'
                              'logger = logging.getLogger()\n\n'
-                             'def run_backlog_processing(input_bucket):\n'
+                             'def run_backlog_processing():\n'
+                             '    input_bucket = os.environ.get("INPUT_BUCKET")\n'
                              '    logger.info(f"Mock processing backlog from bucket: {input_bucket}")\n'
                              '    print(f"Processing backlog from bucket: {input_bucket}")\n'
                              '    print(f"Using decoder at: {os.environ.get(\'MF4_DECODER\')}")\n'
                              '    return True\n\n'
                              'def main():\n'
-                             '    input_bucket = os.environ.get("INPUT_BUCKET")\n'
                              '    logger.info("This is a mock backlog processing script")\n'
-                             '    success = run_backlog_processing(input_bucket)\n'
+                             '    success = run_backlog_processing()\n'
                              '    return 0 if success else 1\n\n'
                              'if __name__ == "__main__":\n'
                              '    sys.exit(main())\n')
@@ -115,8 +116,13 @@ def run_test():
         sys.path.insert(0, os.path.join(PROJECT_ROOT, "mdftoparquet-backlog"))
         import process_backlog_amazon_entry
         
-        # Call the main function
-        result = process_backlog_amazon_entry.main()
+        # Set environment variables for testing
+        os.environ["INPUT_BUCKET"] = "test-bucket"
+        os.environ["LAMBDA_ZIP_NAME"] = "test_lambda.zip"
+        os.environ["MF4_DECODER"] = "mock_decoder.exe" if os.name == 'nt' else "mock_decoder"
+        
+        # Call the process function directly instead of main (which no longer exists)
+        result = process_backlog_amazon_entry.process()
         
         # Check the result
         if result == 0:

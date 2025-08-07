@@ -1,6 +1,11 @@
-# Multi-Cloud MDF to Parquet Converter
+# CANedge MDF to Parquet Automation
 
-This repository contains cloud functions for automatically decoding CANedge MDF log files to Parquet files across Amazon AWS, Google Cloud, and Microsoft Azure platforms. These functions are triggered when new MDF files are uploaded to a cloud storage bucket, process them using DBC decoding, and store the results in Parquet format in an output bucket.
+This repository contains cloud functions for automatically decoding CANedge MDF log files to Parquet files **locally**, as well as on **Amazon AWS**, **Google Cloud** and **Azure** platforms. These functions are triggered when new MDF files are uploaded to a cloud storage bucket, process them using DBC decoding, and store the results in Parquet format in an output bucket. Further, the repository includes code for performing backlog processing and Parquet data lake trip summary aggregation.
+
+> [!NOTE]  
+> See the [CANedge Intro](https://www.csselectronics.com/pages/can-bus-hardware-software-docs) (Process/MF4 decoders) for cloud-specific deployment guidance
+
+---------
 
 ## Repository Structure
 
@@ -23,11 +28,16 @@ Contains the cloud function code for processing individual MDF files when they a
 
 Contains scripts for batch processing existing MDF files in cloud storage buckets.
 
-- `process_backlog_amazon.py` - Script for processing backlog files in AWS S3
-- `process_backlog_azure.py` - Script for processing backlog files in Azure Blob Storage
-- `process_backlog_google.py` - Script for processing backlog files in Google Cloud Storage
+- `process_backlog_amazon.py` - Script for processing backlog files in Amazon
+- `process_backlog_amazon_entry.py` - Extracts above script from Lambda into Glue and runs it
+- `process_backlog_container.py` - Script for processing backlog files in Azure via container
+- `process_backlog_google.py` - Script for processing backlog files in Google 
 
-### 3. `local-testing/` - Local Testing Environment
+### 3. `aggregation/` - Parquet Aggregation Processing
+
+Contains scripts for aggregating Parquet files to trip summray level (as a supplement to the existing Parquet data lake data). The scripts are structured similarly to the backlog scripts.
+
+### 4. `local-testing/` - Local Testing Environment
 
 Contains utilities and scripts for local development and testing.
 
@@ -41,11 +51,14 @@ Shared functionality is in the `modules/` directory at the repository root:
 - `cloud_functions.py` - Cloud provider specific operations (download/upload/list files)
 - `utils.py` - Utility functions for decoding, custom messages, and event detection
 - `custom_message_functions.py` - Functions for creating calculated signals
+- `aggregation.py` - Functionality for aggregation of Parquet data lakes
 - `functions.py` - Additional helper functions
 
 ### Decoders
 - `mdf2parquet_decode` - Linux executable for DBC decoding MDF files to Parquet (used in cloud environments)
 - `mdf2parquet_decode.exe` - Windows executable for DBC decoding (used for local testing)
+
+---------
 
 ## Credential Files
 
@@ -56,141 +69,55 @@ Credential files for local testing are stored in the `local-testing/creds/` dire
 
 These credential files are used during local testing and should contain the necessary permissions to:
 - Read from the input bucket/container
-- Write to the output bucket/container
-- Access notification services (SNS for AWS)
+- Read/write from/to the output bucket/container
 
 ### Credentials Format
 
-Each cloud provider requires a specific credential file format:
+Each cloud provider requires a specific credential file format - see the `json-examples/creds-examples/` folder for the cloud specific structures. Below we outline how you can populate each of these when you've deployed the cloud specific automation workflow as per the CANedge Intro:
 
-1. **Amazon AWS (`amazon-creds.json`):**
-```json
-{
-    "AWS_ACCESS_KEY_ID": "AKIAXXXXXXXXXXXXXXXX",
-    "AWS_SECRET_ACCESS_KEY": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "AWS_DEFAULT_REGION": "eu-central-1",
-    "SNS_ARN": "arn:aws:sns:eu-central-1:123456789012:mdf-to-parquet-lambda-event-sns"
-}
-```
+- **Google credentials**: This can be found in your input bucket (named `<id>-service-account-key.json`)
+- **Amazon credentials**: This can be found in the CloudFormation stack outputs (at the bottom)
+- **Azure credentials**: This can be found in the Azure Function/Settings/Environment variables
 
-2. **Microsoft Azure (`azure-creds.json`):**
-```json
-{
-    "STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=yourstorageaccount;AccountKey=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;EndpointSuffix=core.windows.net"
-}
-```
-
-3. **Google Cloud (`google-creds.json`):**
-```json
-{
-    "type": "service_account",
-    "project_id": "your-project-id",
-    "private_key_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "private_key": "-----BEGIN PRIVATE KEY-----\nxxx...xxx\n-----END PRIVATE KEY-----\n",
-    "client_email": "service-account-name@your-project-id.iam.gserviceaccount.com",
-    "client_id": "123456789012345678901",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/service-account-name%40your-project-id.iam.gserviceaccount.com",
-    "universe_domain": "googleapis.com"
-}
-```
-
-#### How to Find Credential Information
-
-- **Google credentials**: The service account key can be found in your input bucket and is named `<id>-service-account-key.json`
-- **Amazon credentials**: The access information can be found in the CloudFormation stack outputs (at the bottom of the outputs)
-- **Azure credentials**: The storage connection string can be found in the Azure Function/Settings/Environment variables under `StorageConnectionString`
-
+---------
 
 ## Local Testing
 
-The repository includes several scripts and batch files in the `local-testing/` directory that allow you to test the cloud functions locally before deployment:
+The repository includes several scripts and batch files in the `local-testing/` directory that allow you to test the cloud functions locally before deployment. Make sure to update the `creds/` folder if testing one of the cloud scripts. The repository contains `*.bat` files for various test cases that can be easily modified with your own input bucket/container details. 
 
-### Environment Setup
+---------
 
-1. **Credential Files**:
-   - Place the appropriate credentials in `local-testing/creds/` directory
-   - Each cloud provider requires its own credential file format
 
-2. **Environment Variables**:
-   - `INPUT_BUCKET` - Source bucket/container name where MDF files are stored
-   - `MF4_DECODER` - Path to the decoder executable (automatically set by test scripts)
-   - Cloud-specific environment variables are set automatically by the `run_test.py` script
+### Advanced Functionality
 
-### Testing Single File Processing
+Advanced functionality for the automation integration relies on uploading specific JSON files to the input bucket:
 
-Use these batch files to test processing a single MDF file:
+- **Custom Messages**: Define custom calculated signals via `custom-messages.json` 
+- **Event Detection**: Configure event detection via `events.json` 
+- **Device-Specific DBC**: Configure device-specific DBC decoding via `dbc-groups.json`
+- **Decryption**: Decrypt `MFE`, `MFM` files via `passwords.json` 
 
-```
-.\test_amazon_single.bat   # Test AWS Lambda single file processing
-.\test_azure_single.bat    # Test Azure Function single file processing
-.\test_google_single.bat   # Test Google Cloud Function single file processing
-```
+The `json-examples/` folder contains examples showing the structure of the above files. Details on these topics can be found in the CANedge Intro.
 
-These scripts will:
-1. Load appropriate credentials
-2. Create mock cloud events
-3. Set necessary environment variables
-4. Invoke the cloud function code locally
-
-### Testing Backlog Processing
-
-Use these batch files to test batch processing with a backlog.json file:
-
-```
-.\test_amazon_backlog.bat  # Test AWS S3 backlog processing
-.\test_azure_backlog.bat   # Test Azure Blob Storage backlog processing
-.\test_google_backlog.bat  # Test Google Cloud Storage backlog processing
-.\test_backlog_local.bat   # Test local backlog processing
-```
-
-### Under the Hood
-
-- `run_test.py` - Main test runner script that handles environment setup, credentials loading, and cloud function invocation
-- `utils_testing.py` - Contains utilities for loading credentials and creating mock cloud events for different cloud providers
-   - Sets necessary environment variables (e.g., `GOOGLE_APPLICATION_CREDENTIALS` for Google Cloud)
-   - Creates a test event based on the cloud provider or uses the backlog file if provided
-   - Invokes the appropriate cloud function entry point with the test event
-   - Processes the files similar to how they would be processed in the cloud environment
-
-4. **Batch Processing with backlog.json**:
-   - The script can process a list of files using a backlog.json file
-   - Create a JSON file with an array of file paths to process:
-     ```json
-     [
-       "00000005-6497EEED.MF4",
-       "00000006-6497F67D.MF4"
-     ]
-     ```
-   - Run with the backlog option and specify the input bucket:
-     ```
-     python local_invocation.py --cloud Amazon --backlog backlog.json --input-bucket my-bucket-name
-     ```
-
-## Local Backlog Processing
-
-The repository includes a local testing framework that allows you to run the cloud functions locally:
-
-```bash
-python local-testing/run_test.py \
-  --cloud Local \
-  --input-bucket <path-to-input-folder> \
-  --backlog
-```
-
-This will process a backlog of files stored in a local folder without requiring any cloud credentials.
+---------
 
 ## Backlog Processing
 
-To process a large number of MDF files efficiently, backlog processing scripts are provided for each cloud provider and local environments:
-- `mdftoparquet-backlog/process_backlog_amazon.py`
-- `mdftoparquet-backlog/process_backlog_azure.py`
-- `mdftoparquet-backlog/process_backlog_google.py`
-- `mdftoparquet-backlog/process_backlog_local.py`
+To process a large number of MDF files efficiently, backlog processing scripts are provided for each cloud provider and local environments. These scripts read a `backlog.json` file from the root of the input bucket/folder, which contains a list of MDF files to process. You can test this locally via the `--backlog` flag:
 
-These scripts read a `backlog.json` file from the root of the input bucket or folder, which contains a list of MDF files to process.
+```bash
+python local-testing/run_test.py \
+  --cloud <Amazon|Google|Azure|Local> \
+  --input-bucket <bucket-name-or-folder> \
+  --backlog
+```
+
+See the CANedge Intro for guidance on executing backlog processing directly within your cloud, where the relevant scripts will be deployed automatically as part of the default integration.
+
+
+> [!NOTE]  
+> Backlog processing takes your advanced functionality into account (event detection, custom messages etc). However, event notification is disabled during backlog processing.
+
 
 ### Backlog File Structure
 
@@ -217,117 +144,99 @@ You can specify three types of entries in the backlog file:
 
 **Note**: For prefixes (device or session), trailing slashes are optional - they will be automatically added if missing. File paths should not have trailing slashes.
 
-### Processing Backlog Files
+---------
 
-To process a backlog of files, use the `--backlog` flag:
+## Aggregation Processing
+
+The repository includes functionality for aggregating Parquet data into trip summaries across all cloud providers. These scripts read an `aggregations.json` file from the root of the input bucket, which defines how Parquet data should be aggregated into trips. You can test this locally via the `--aggregate` flag:
 
 ```bash
 python local-testing/run_test.py \
   --cloud <Amazon|Google|Azure|Local> \
   --input-bucket <bucket-name-or-folder> \
-  --backlog
+  --aggregate
 ```
 
-The backlog feature expects a `backlog.json` file in the root of the input bucket or folder, containing a list of MDF files to process.
+See the CANedge Intro for guidance on executing aggregation processing directly within your cloud, where the relevant scripts will be deployed automatically as part of the default integration.
+
+### Aggregation Configuration Structure
+
+The aggregations.json file defines how to identify and process trips in the Parquet data:
+
+```json
+{
+  "config": {
+    "date": {
+      "mode": "specific_period",
+      "start_date": "2023-01-01",
+      "end_date": "2023-12-31"
+    },
+    "trip": {
+      "trip_gap_min": 10,
+      "trip_min_length_min": 1
+    }
+  },
+  "device_clusters": [
+    {
+      "devices": ["2F6913DB", "ABCDEF12"],
+      "cluster": "cluster1"
+    }
+  ],
+  "cluster_details": [
+    {
+      "clusters": ["cluster1"],
+      "details": {
+        "trip_identifier": {"message": "CAN2_GnssSpeed"},
+        "aggregations": [
+          {
+            "message": "CAN2_GnssSpeed",
+            "signal": ["Speed"],
+            "aggregation": ["avg", "max"]
+          },
+          {
+            "message": "CAN2_GnssPosition",
+            "signal": ["Latitude", "Longitude"],
+            "aggregation": ["first", "last"]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+- **config**: Top-level configuration section
+  - **date**: Date range configuration
+    - **mode**: Either "specific_period" (use explicit dates) or "previous_day" (automatic)
+    - **start_date/end_date**: Required for "specific_period" mode (format: YYYY-MM-DD)
+  - **trip**: Trip detection parameters
+    - **trip_gap_min**: Minutes of inactivity to consider a new trip has started
+    - **trip_min_length_min**: Minimum trip length in minutes to be considered valid
+
+- **device_clusters**: Group devices into logical clusters
+  - **devices**: List of device IDs (serial numbers) to process
+  - **cluster**: Name assigned to this group of devices
+
+- **cluster_details**: Processing configuration for each cluster
+  - **clusters**: List of cluster names to apply these settings to
+  - **details**: Processing configuration
+    - **trip_identifier**: Message used to identify trips
+    - **aggregations**: List of signals to aggregate
+      - **message**: Parquet data lake message folder name
+      - **signal**: List of signal names to aggregate
+      - **aggregation**: List of aggregation functions (avg, max, min, sum, first, last, etc.)
+
+---------
 
 ## Deployment
 
 ### Preparing Deployment Packages
 
-The repository includes a script to generate deployment ZIP files for each cloud platform:
+The repository includes a script to generate deployment ZIP files, scripts and containers for the various cloud platforms. These are primarily designed for developer use or by CSS Electronics for updating deployment stacks. For details on deploying the cloud functions as a CANedge end user, see the CANedge Intro.
 
-```
-cd mdftoparquet
-.\prepare_mdftoparquet_zip_files.bat
-```
+---------
 
-This script will:
-
-1. Check for the presence of 7-Zip and install it if necessary
-2. Read version information from `mdftoparquet-versions.cfg`
-3. Create separate ZIP files for each cloud provider in the `release/` directory:
-   - `mdf-to-parquet-amazon-function-v{version}.zip` for AWS Lambda
-   - `mdf-to-parquet-google-function-v{version}.zip` for Google Cloud Functions
-   - `mdf-to-parquet-azure-function-v{version}.zip` for Azure Functions
-
-Each ZIP file contains:
-- The appropriate cloud function entry point
-- The Linux version of the decoder executable (`mdf2parquet_decode`)
-- All required modules from the `modules/` directory
-- Cloud-specific configuration files from the respective function root directories
-
-### Deployment to Cloud Platforms
-
-#### Amazon AWS Lambda
-
-1. Upload the Amazon ZIP file to your AWS Lambda function:
-   - AWS Console > Lambda > Functions > Your Function > Code > Upload from > .zip file
-   - Select the generated ZIP file from the `release/` directory
-
-2. Configure environment variables:
-   - `INPUT_BUCKET` - S3 bucket containing MDF files
-   - Make sure the execution role has permissions to read from the input bucket and write to the output bucket
-
-3. Set up an S3 trigger for new object creation events:
-   - Add trigger > S3 > Select your input bucket > Event type: All object create events
-
-#### Google Cloud Functions
-
-1. Deploy the Google ZIP file to Google Cloud Functions:
-   - Google Cloud Console > Cloud Functions > Create Function
-   - Runtime: Python 3.9+
-   - Entry point: `process_mdf_file`
-   - Upload the generated ZIP file from the `release/` directory
-
-2. Configure environment variables:
-   - `INPUT_BUCKET` - GCS bucket containing MDF files
-   - Make sure the service account has permissions to read/write to the appropriate buckets
-
-3. Set up a Cloud Storage trigger:
-   - Trigger type: Cloud Storage
-   - Event type: Finalize/Create
-   - Bucket: Your input bucket
-
-#### Azure Functions
-
-1. Deploy the Azure ZIP file to Azure Functions:
-   - Azure Portal > Function Apps > Your Function App > Functions
-   - Deploy the generated ZIP file using Azure Functions Core Tools or VS Code
-
-2. Configure application settings:
-   - `INPUT_BUCKET` - Azure Storage container containing MDF files
-   - Configure storage connection strings in Application Settings
-
-3. Set up a Blob Storage trigger:
-   - Binding type: Blob Storage trigger
-   - Path: your-container/{name}
-
-### Backlog Processing
-
-For processing existing files in bulk:
-
-1. Create a `backlog.json` file with an array of file paths to process
-2. Upload this file to the root of your input bucket
-3. Use the appropriate backlog processing script for your cloud provider:
-   - AWS: Use the `process_backlog_amazon.py` script
-   - Azure: Use the `process_backlog_azure.py` script
-   - Google: Use the `process_backlog_google.py` script
-
-## Parquet File Validation
-
-To validate the generated Parquet files, you can use the provided `validate_parquet_files.py` script:
-
-```
-python validate_parquet_files.py <directory_path>
-```
-
-This utility will:
-1. Recursively scan for all Parquet files (*.parquet, *.pq) in the specified directory
-2. Attempt to load each file using PyArrow to verify its validity
-3. Report any invalid Parquet files along with detailed error messages
-4. Provide a summary of valid and invalid files
-
-## How It Works
+## Backround - How The MF4 to Parquet Decoding Works
 
 1. **Trigger**: A new MDF file (`.MF4`, `.MFC`, `.MFE`, or `.MFM`) is uploaded to the input bucket/container
 2. **Processing**:
@@ -340,59 +249,3 @@ This utility will:
    - Parquet files are created for each unique CAN message in the structure: `<deviceid>/<message>/<yyyy>/<mm>/<dd>/<xyz>.parquet`
    - Files are uploaded to the output bucket/container (named with `-parquet` suffix)
    - For events, notifications may be sent (e.g., via SNS in AWS)
-
-## Additional Configuration
-
-- **Custom Messages**: Define custom calculated signals by uploading a `custom-messages.json` file to the input bucket
-- **Event Detection**: Configure event detection by uploading an `events.json` file to the input bucket
-- **Device-Specific DBC**: Device-specific DBC files can be referenced in a device configuration file
-
-## Notes
-
-- The code is designed to be as cloud-agnostic as possible, with 95% of the code shared between the cloud functions
-- The MDF decoder executables (`mdf2parquet_decode` and `mdf2parquet_decode.exe`) are pre-compiled and should be included in the deployment packages
-- When testing locally on Windows, use the `.exe` version of the decoder
-- When deploying to cloud environments, use the Linux version of the decoder
-
-## Using Backlog Files
-
-For batch processing of multiple files, you can use a `backlog.json` file. This allows processing existing files in the storage bucket without re-uploading them.
-
-### Backlog File Structure
-
-The backlog file is structured as a flat list of items to process:
-
-```json
-[
-  "2F6913DB/",
-  "ABCDEF12/00000088/",
-  "2F6913DB/00000086/00000001-62961868.MF4",
-  "2F6913DB/00000086/00000003-62977DFB.MF4"
-]
-```
-
-The system will handle grouping and batching these items for optimal processing.
-
-### Prefix Types and File Paths
-
-You can specify three types of entries in the backlog file:
-
-1. **Device Prefixes**: Path to a device folder (e.g., `"2F6913DB/"`) - processes all sessions under that device
-2. **Session Prefixes**: Path to a specific session (e.g., `"2F6913DB/00000088/"`) - processes all files in that session
-3. **Individual Files**: Complete file path (e.g., `"2F6913DB/00000086/00000001-62961868.MF4"`) - processes a specific file
-
-**Note**: For prefixes (device or session), trailing slashes are optional - they will be automatically added if missing. File paths should not have trailing slashes.
-
-### Running with a Backlog File
-
-To process a backlog file:
-
-```
-python local_invocation.py --cloud Amazon --backlog backlog-examples/backlog.json --input-bucket your-bucket-name
-```
-
-The system will:
-1. Expand all prefixes into individual file paths
-2. Group files by session to optimize processing
-3. Execute the processing in batches
-4. Avoid duplicate processing if the same file appears multiple times

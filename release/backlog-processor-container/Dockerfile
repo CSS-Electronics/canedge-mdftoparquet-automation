@@ -4,8 +4,13 @@ LABEL org.opencontainers.image.source=https://github.com/CSS-Electronics/canedge
 
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Environment variables
+# Note: CLOUD must be provided at runtime (Azure, Amazon, or Google)
+ENV PYTHONUNBUFFERED=1
+ENV MF4_DECODER=/app/mdf2parquet_decode
+
+# Copy and install requirements
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the executable
@@ -14,11 +19,7 @@ RUN chmod +x /app/mdf2parquet_decode
 
 # Copy the Python modules and scripts
 COPY modules/ /app/modules/
-COPY process_backlog_azure.py /app/
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV MF4_DECODER=/app/mdf2parquet_decode
+COPY process_backlog_container.py /app/
 
 # Command to run when container starts
-ENTRYPOINT ["python", "process_backlog_azure.py"]
+ENTRYPOINT ["python", "process_backlog_container.py"]
