@@ -83,16 +83,113 @@ set "GOOGLE_BUILD_DIR=%TEMP_DIR%\google-aggregation"
 mkdir "%GOOGLE_BUILD_DIR%"
 mkdir "%GOOGLE_BUILD_DIR%\modules"
 
-:: Copy files for Google Aggregation
-copy process_aggregation_google.py "%GOOGLE_BUILD_DIR%\"
+:: Check for required files
+echo Checking required files for Google Aggregation...
 
-:: Copy modules
-xcopy /E /I /Y "%REPO_ROOT%\modules" "%GOOGLE_BUILD_DIR%\modules"
+:: Check for process_aggregation_google.py
+if not exist process_aggregation_google.py (
+    echo ERROR: Required file process_aggregation_google.py not found!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
 
-:: Create zip archive
-set "GOOGLE_ZIP=process-aggregation-google-v%GOOGLE_VERSION%.zip"
-cd "%TEMP_DIR%"
-"%SEVENZIP_PATH%" a -r "%REPO_ROOT%\release\%GOOGLE_ZIP%" "google-aggregation\*"
+:: Copy files for Google Aggregation after all checks have passed
+echo Copying Google Aggregation files...
+:: Rename process_aggregation_google.py to main.py for Google Cloud Function requirements
+copy process_aggregation_google.py "%GOOGLE_BUILD_DIR%\main.py"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to copy process_aggregation_google.py!
+    set ERROR_OCCURRED=1
+    exit /b 1
+)
+
+:: Copy requirements.txt if it exists
+if exist "google-function-root\requirements.txt" (
+    copy "google-function-root\requirements.txt" "%GOOGLE_BUILD_DIR%\"
+    if %ERRORLEVEL% NEQ 0 (
+        echo ERROR: Failed to copy requirements.txt!
+        set ERROR_OCCURRED=1
+        exit /b 1
+    )
+)
+
+:: Copy modules excluding __pycache__ folders
+echo Copying modules to Google Aggregation build directory (excluding __pycache__)...
+
+:: Copy individual module files
+for %%f in ("%REPO_ROOT%\modules\*.py") do (
+    copy "%%f" "%GOOGLE_BUILD_DIR%\modules\"
+    if %ERRORLEVEL% NEQ 0 (
+        echo ERROR: Failed to copy module file %%~nxf!
+        set ERROR_OCCURRED=1
+        exit /b 1
+    )
+)
+
+:: Copy module subdirectories excluding __pycache__
+for /D %%d in ("%REPO_ROOT%\modules\*") do (
+    set "folder=%%~nxd"
+    if /I not "!folder!"=="__pycache__" (
+        if exist "%%d" (
+            mkdir "%GOOGLE_BUILD_DIR%\modules\!folder!" 2>nul
+            xcopy /E /I /Y "%%d" "%GOOGLE_BUILD_DIR%\modules\!folder!"
+            if %ERRORLEVEL% NEQ 0 (
+                echo ERROR: Failed to copy module directory !folder!!
+                set ERROR_OCCURRED=1
+                exit /b 1
+            )
+        )
+    ) else (
+        echo Skipping __pycache__ folder
+    )
+)
+
+:: Create zip archive with explicit full paths to avoid any path issues
+set "GOOGLE_ZIP=aggregation-processor-google-v%GOOGLE_VERSION%.zip"
+
+:: Get absolute paths
+pushd "%TEMP_DIR%"
+set "TEMP_DIR_ABS=%CD%"
+popd
+
+pushd "%REPO_ROOT%\release"
+set "RELEASE_DIR_ABS=%CD%"
+popd
+
+:: Delete the file if it already exists
+if exist "%RELEASE_DIR_ABS%\%GOOGLE_ZIP%" (
+    echo Removing existing Google Aggregation zip file...
+    del /F "%RELEASE_DIR_ABS%\%GOOGLE_ZIP%"
+    if %ERRORLEVEL% NEQ 0 (
+        echo WARNING: Failed to delete existing zip file, continuing...
+    )
+)
+
+:: Move to temp directory and create zip file with absolute paths
+cd "%TEMP_DIR_ABS%"
+
+echo Creating Google Aggregation zip file: %GOOGLE_ZIP%
+echo Current directory: %CD%
+echo Target zip file: %RELEASE_DIR_ABS%\%GOOGLE_ZIP%
+
+"%SEVENZIP_PATH%" a -tzip "%RELEASE_DIR_ABS%\%GOOGLE_ZIP%" ".\google-aggregation\*" -r
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to create Google Aggregation zip file!
+    set ERROR_OCCURRED=1
+    cd "%~dp0"
+    exit /b 1
+)
+
+:: Verify the file was created with dir command to show output
+dir "%RELEASE_DIR_ABS%\%GOOGLE_ZIP%" 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Google Aggregation zip file was not created or cannot be accessed!
+    set ERROR_OCCURRED=1
+    cd "%~dp0"
+    exit /b 1
+)
+
+:: Return to original directory
 cd "%~dp0"
 
 echo Google Aggregation zip created: %OUTPUT_DIR%\%GOOGLE_ZIP%
