@@ -1,5 +1,3 @@
-# MF4 decoder version: v24.12.19
-# Lambda script version: 3.0.1
 import boto3
 import os
 from modules.mdf_to_parquet import mdf_to_parquet 

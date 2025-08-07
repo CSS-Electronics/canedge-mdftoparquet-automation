@@ -791,7 +791,7 @@ class ProcessBacklog:
             self.logger.info(f"\n\n\nBACKLOG: PROCESS BATCH {i} OF {len(backlog_batches)} ({len(batch)} OBJECTS)")
             try:
                 # Set up required parameters for mdf_to_parquet
-                notification_client = None  # Default to None for Azure/Google, will be overridden for Amazon if needed
+                notification_client = False  # ensures notifications are not sent for events during backlog processing
                 bucket_output = f"{self.bucket_input}-parquet"
                 
                 # For Amazon, initialize notification client
