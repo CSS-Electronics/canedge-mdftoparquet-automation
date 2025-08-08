@@ -121,18 +121,32 @@ See the CANedge Intro for guidance on executing backlog processing directly with
 
 ### Backlog File Structure
 
-The backlog file is structured as a flat list of items to process:
+The backlog.json file must use the following format with required configuration fields:
 
 ```json
-[
-  "2F6913DB/",
-  "ABCDEF12/00000088/",
-  "2F6913DB/00000086/00000001-62961868.MF4",
-  "2F6913DB/00000086/00000003-62977DFB.MF4"
-]
+{
+  "config": {
+    "batch_size": {
+      "min": 10,
+      "max": 256
+    }
+  },
+  "files": [
+    "2F6913DB/",
+    "ABCDEF12/00000088/",
+    "2F6913DB/00000086/00000001-62961868.MF4",
+    "2F6913DB/00000086/00000003-62977DFB.MF4"
+  ]
+}
 ```
 
-The system will handle grouping and batching these items for optimal processing.
+- **config**: Required configuration section
+  - **batch_size**: Required batch size configuration
+    - **min**: Minimum items to trigger batch optimization (required)
+    - **max**: Maximum items per batch (required)
+- **files**: Required array of file paths/prefixes to process
+
+All configuration parameters are required - the system will validate the structure of the backlog.json file and fail if any required field is missing.
 
 ### Prefix Types and File Paths
 
