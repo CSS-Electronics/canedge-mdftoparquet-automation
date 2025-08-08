@@ -506,7 +506,7 @@ def publish_notification(cloud, client, subject, message, logger):
     """
     import os
     if cloud == "Amazon":
-        if notification_client == None:
+        if notification_client == None or notification_client == False:
             logger.info(f"- No message client available")
             return False
         
@@ -525,10 +525,10 @@ def publish_notification(cloud, client, subject, message, logger):
         except Exception as e:
             logger.error(f"Error publishing to SNS: {e}")
             return False
-    elif cloud == "Google":
+    elif cloud == "Google" and notification_client:
         # Below will trigger a GCP Metric --> Alert --> Notification based on the payload containing 'NEW EVENT'
         logger.info(f"NEW EVENT: {message}")
-    elif cloud == "Azure":
+    elif cloud == "Azure" and notification_client:
         # Add NEW EVENT log pattern for Azure Monitor to detect
         logger.info(f"NEW EVENT: {message}")
         return True

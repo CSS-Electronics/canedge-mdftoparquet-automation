@@ -2,3 +2,11 @@ local-testing/creds/*
 *.zip
 *pycache*
 *local-input-bucket-parquet*
+
+
+release/aggregation-processor-google*
+release/backlog-processor-google*
+release/backlog-processor-local*
+release/mdf-to-parquet-*
+release/process_aggregation_amazon_entry-*
+release/process_backlog_amazon_entry-*

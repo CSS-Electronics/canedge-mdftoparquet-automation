@@ -607,12 +607,14 @@ def check_geofence(row, signal_latitude, signal_longitude, geofences):
 # -----------------------------------------------------------
 # Class for processing backlog.json with flexible prefix specification
 class ProcessBacklog:
-    def __init__(self, cloud, storage_client, bucket_input, logger):
+    def __init__(self, cloud, storage_client, bucket_input, logger, min_batch_size=10, max_batch_size=256):
         self.logger = logger
         self.cloud = cloud
         self.storage_client = storage_client
         self.bucket_input = bucket_input
         self.valid_extensions = [".MF4", ".MFC", ".MFE", ".MFM"]
+        self.min_batch_size = min_batch_size
+        self.max_batch_size = max_batch_size
         
     def download_backlog_json(self):
         """Download backlog.json from the root of the input bucket/container"""
@@ -633,8 +635,46 @@ class ProcessBacklog:
             
             try:
                 with open(backlog_file_path, "r") as f:
-                    backlog_file_data = json.load(f)
-                    self.logger.info(f"Successfully loaded backlog.json with {len(backlog_file_data)} items")
+                    data = json.load(f)
+                    
+                    # Require the new JSON format with config fields
+                    if not isinstance(data, dict):
+                        self.logger.error("Invalid backlog.json format: expected an object with 'config' and 'files' properties")
+                        return None
+                        
+                    # Check required fields
+                    if "files" not in data:
+                        self.logger.error("Invalid backlog.json format: missing 'files' property")
+                        return None
+                        
+                    if "config" not in data:
+                        self.logger.error("Invalid backlog.json format: missing 'config' property")
+                        return None
+                        
+                    if "batch_size" not in data["config"]:
+                        self.logger.error("Invalid backlog.json format: missing 'batch_size' in config")
+                        return None
+                        
+                    # Get files list
+                    backlog_file_data = data["files"]
+                    self.logger.info(f"Using backlog.json with {len(backlog_file_data)} items")
+                    
+                    # Extract batch size parameters from config
+                    batch_config = data["config"]["batch_size"]
+                    
+                    if "min" not in batch_config:
+                        self.logger.error("Invalid backlog.json format: missing 'min' in batch_size config")
+                        return None
+                        
+                    if "max" not in batch_config:
+                        self.logger.error("Invalid backlog.json format: missing 'max' in batch_size config")
+                        return None
+                    
+                    # Set batch size parameters
+                    self.min_batch_size = batch_config["min"]
+                    self.max_batch_size = batch_config["max"]
+                    self.logger.info(f"Using batch_size parameters from config: min={self.min_batch_size}, max={self.max_batch_size}")
+                        
                     return backlog_file_data
             except json.JSONDecodeError as e:
                 self.logger.error(f"Error parsing backlog.json - invalid JSON format: {e}")
@@ -766,14 +806,45 @@ class ProcessBacklog:
         # Process the backlog to get batches
         backlog_batches = self.process_backlog(backlog_data_list)
         
-        # Optimization: If we have a small number of items (less than 10), combine them into a single batch
+        # Optimization: Combine batches from the same device with size constraints
         # This avoids processing small batches separately when it's more efficient to process them together
-        if len(backlog_batches) > 1 and total_items < 10:
-            self.logger.info(f"Optimizing by combining {len(backlog_batches)} small batches into a single batch")
-            combined_batch = []
+        # But ensures we don't combine files from different devices or exceed max batch size
+        if len(backlog_batches) > 1 and total_items < self.min_batch_size:
+            self.logger.info(f"Optimizing by combining small batches from the same device (min_batch_size={self.min_batch_size}, max_batch_size={self.max_batch_size})")
+            # Group batches by device ID
+            device_batches = {}
             for batch in backlog_batches:
-                combined_batch.extend(batch)
-            backlog_batches = [combined_batch]
+                if not batch:  # Skip empty batches
+                    continue
+                # Extract device ID from first file in batch (device ID is the first part of the path)
+                first_file = batch[0]
+                device_id = first_file.split('/')[0] if '/' in first_file else None
+                
+                if device_id:
+                    # Initialize device batch list if needed
+                    if device_id not in device_batches:
+                        device_batches[device_id] = []
+                    # Add all files from this batch to the device batch
+                    device_batches[device_id].extend(batch)
+                else:
+                    # If we can't identify the device, keep the batch separate
+                    device_batches[f"unknown_{len(device_batches)}"] = batch
+            
+            # Now split any device batches that exceed max_batch_size
+            final_batches = []
+            for device_id, files in device_batches.items():
+                # If batch exceeds max size, split it into smaller batches
+                if len(files) > self.max_batch_size:
+                    self.logger.info(f"Device {device_id} has {len(files)} files, exceeding max_batch_size of {self.max_batch_size}. Splitting into multiple batches.")
+                    for i in range(0, len(files), self.max_batch_size):
+                        batch_slice = files[i:i + self.max_batch_size]
+                        final_batches.append(batch_slice)
+                else:
+                    final_batches.append(files)
+            
+            # Replace the original batches with the device-grouped and size-limited batches
+            backlog_batches = final_batches
+            self.logger.info(f"Optimized into {len(backlog_batches)} device-specific batches with size limits applied")
         
         # Process the MDF batches
         return self.process_mdf_batches(backlog_batches)
@@ -791,7 +862,7 @@ class ProcessBacklog:
             self.logger.info(f"\n\n\nBACKLOG: PROCESS BATCH {i} OF {len(backlog_batches)} ({len(batch)} OBJECTS)")
             try:
                 # Set up required parameters for mdf_to_parquet
-                notification_client = None  # Default to None for Azure/Google, will be overridden for Amazon if needed
+                notification_client = False  # ensures notifications are not sent for events during backlog processing
                 bucket_output = f"{self.bucket_input}-parquet"
                 
                 # For Amazon, initialize notification client
