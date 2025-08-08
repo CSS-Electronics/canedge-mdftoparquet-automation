@@ -100,10 +100,19 @@ class DownloadObjects:
     # -----------------------------------------------
     # Download trigger log file
     def download_log_file(self, log_file_object_path):
-        object_path = log_file_object_path
-        fs_file_path = self.tmp_input_dir / "logfiles" / object_path.name
-
-        download_object(self.cloud, self.storage_client, self.bucket_input, str(object_path), str(fs_file_path), self.logger)
+        from pathlib import Path
+        
+        # Convert to Path if it's not already
+        path_obj = log_file_object_path if isinstance(log_file_object_path, Path) else Path(str(log_file_object_path))
+        
+        # Create unique filename by replacing separators with underscores
+        unique_name = str(path_obj).replace('/', '_').replace('\\', '_')
+        
+        # Create destination path
+        fs_file_path = self.tmp_input_dir / "logfiles" / unique_name
+        
+        # Download the object
+        download_object(self.cloud, self.storage_client, self.bucket_input, str(log_file_object_path), str(fs_file_path), self.logger)
 
     # -----------------------------------------------   
     # Download passwords.json file if needed
