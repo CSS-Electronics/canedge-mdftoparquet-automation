@@ -11,10 +11,7 @@ import functions_framework
 from google.cloud import storage
 from modules.aggregation import AggregateData
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-def run_aggregation():
+def run_aggregation(logger):
     input_bucket = os.environ.get("INPUT_BUCKET")
     output_bucket = input_bucket + "-parquet"
     cloud = "Google"
@@ -38,8 +35,9 @@ def run_aggregation():
 # Google Cloud Function (HTTP trigger)
 @functions_framework.http
 def http_aggregation(request):
-    logger.info("Starting cloud function aggregation")
-    result = run_aggregation()
+    cloud_logger = logging.getLogger()
+    cloud_logger.setLevel(logging.INFO)
+    result = run_aggregation(cloud_logger)
     
     if result == 0:
         return {"status": "success", "message": "Aggregation completed successfully"}, 200
@@ -48,5 +46,6 @@ def http_aggregation(request):
    
 # Local testing     
 if __name__ == "__main__":
-    logger.info("Starting local aggregation")
-    sys.exit(run_aggregation())
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    local_logger = logging.getLogger()
+    sys.exit(run_aggregation(local_logger))

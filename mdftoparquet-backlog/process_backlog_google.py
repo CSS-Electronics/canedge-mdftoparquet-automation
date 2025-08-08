@@ -12,10 +12,11 @@ import functions_framework
 from google.cloud import storage
 from modules.utils import ProcessBacklog
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Logger is initialized differently based on execution context
+# For cloud function execution, we use a simple logger
+# For local execution, the logger is configured in the main block
 
-def run_backlog_processing():
+def run_backlog_processing(logger):
     input_bucket = os.environ.get("INPUT_BUCKET")
     cloud = "Google"
     try:
@@ -30,7 +31,10 @@ def run_backlog_processing():
 # Google Cloud Function (HTTP trigger)
 @functions_framework.http
 def process_mdf_file(request):
-    result = run_backlog_processing()
+    cloud_logger = logging.getLogger()
+    cloud_logger.setLevel(logging.INFO)
+    
+    result = run_backlog_processing(cloud_logger)
     
     if result == 0:
         return {"status": "success", "message": "Backlog processing completed successfully"}, 200
@@ -39,4 +43,7 @@ def process_mdf_file(request):
    
 # Local testing     
 if __name__ == "__main__":
-    sys.exit(run_backlog_processing())
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    local_logger = logging.getLogger()
+    
+    sys.exit(run_backlog_processing(local_logger))
