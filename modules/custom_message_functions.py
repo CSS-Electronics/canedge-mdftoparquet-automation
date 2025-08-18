@@ -1,7 +1,8 @@
 # This function includes the custom logic for creating calculated signals
 # You can update/extend the logic as needed - or use one of the existing examples
-def apply_custom_function(df_messages, function):   
+def apply_custom_function(df_messages, function, download_objects=None):   
     from .utils import check_geofence
+    import json
     
     # Example 1: Combine multiple DM01 messages into a single message incl. the SA and 'final' SPN    
     if function == "combine_dtcs":
@@ -11,7 +12,22 @@ def apply_custom_function(df_messages, function):
     
     # Example 2: Add custom geofences 
     if function == "custom_geofences":
-        geofences = [(1,"Area1",(56.07270599999998,10.103397999999999),0.2),(2,"Area2",(56.116626,10.154563999999993),0.3)]
+        try:
+            geofences_data = download_objects.download_json_file("geofences.json")
+            
+            # Convert geofences from JSON format to tuple format used by check_geofence
+            geofences = [(
+                fence["id"],
+                fence["name"],
+                (fence["latitude"], fence["longitude"]),
+                fence["radius"]
+            ) for fence in geofences_data]
+            
+            download_objects.logger.info(f"Loaded {len(geofences)} geofences from geofences.json")
+        except Exception as e:
+            download_objects.logger.error(f"Error loading geofences.json: {str(e)}")
+            raise
+        
         df_messages["GeofenceId"] = df_messages.apply(check_geofence, axis=1, args=("Latitude", "Longitude", geofences))
         signals_to_include = ["GeofenceId"]
         df_messages = df_messages[signals_to_include]

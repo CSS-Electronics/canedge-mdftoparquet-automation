@@ -1,0 +1,16 @@
+[
+    {
+        "id": 1,
+        "name": "Home Base",
+        "latitude": 56.072706,
+        "longitude": 10.103398,
+        "radius": 0.2
+    },
+    {
+        "id": 2,
+        "name": "Service Center",
+        "latitude": 56.116626,
+        "longitude": 10.154564,
+        "radius": 0.3
+    }
+]

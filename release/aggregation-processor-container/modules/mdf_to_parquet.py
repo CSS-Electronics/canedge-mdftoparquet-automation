@@ -26,7 +26,7 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
         
         # Initialize classes for downloading objects, decoding MDFs, creating custom messages and detecting events 
         do = DownloadObjects(cloud, storage_client, bucket_input, tmp_input_dir, log_file_object_paths[0], logger)
-        ccm = CreateCustomMessages(tmp_output_dir, logger)   
+        ccm = CreateCustomMessages(tmp_output_dir, logger, download_objects=do)
         de = DetectEvents(cloud, storage_client, notification_client, bucket_input, tmp_input_dir, tmp_output_dir, logger)
 
         # Get device ID, device specific DBC list, DBC files, log file and passwords file

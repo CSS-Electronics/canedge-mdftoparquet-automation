@@ -177,9 +177,10 @@ def decode_log_file(decoder, tmp_input_dir, tmp_output_dir, logger):
 # -----------------------------------------------------------
 # Class for loading decoded files into a data frame, applying custom processing and store result as Parquet 
 class CreateCustomMessages:
-    def __init__(self, tmp_output_dir, logger):
+    def __init__(self, tmp_output_dir, logger, download_objects=None):
         self.logger = logger
-        self.tmp_output_dir =  tmp_output_dir     
+        self.tmp_output_dir =  tmp_output_dir
+        self.download_objects = download_objects
     
     def create_custom_messages(self, custom_messages):
         # If no custom-messages.json is found, exit early before importing modules
@@ -223,7 +224,7 @@ class CreateCustomMessages:
                         continue 
                     
                     # Update data frame by applying apply custom functions 
-                    df_messages = apply_custom_function(df_messages, custom_message["function"])
+                    df_messages = apply_custom_function(df_messages, custom_message["function"], self.download_objects)
                                       
                     # Write the new custom file as Parquet to unique path                     
                     custom_file = self.tmp_output_dir / device / custom_message_name / date / file_name 

@@ -1,0 +1,16 @@
+[
+    {
+        "id": 1,
+        "name": "Aarhus East Hub",
+        "latitude": 56.11128,
+        "longitude": 10.22127,
+        "radius": 0.25
+    },
+    {
+        "id": 2,
+        "name": "Silkeborg Delivery Center",
+        "latitude": 56.02890,
+        "longitude": 9.95767,
+        "radius": 0.25
+    }
+]

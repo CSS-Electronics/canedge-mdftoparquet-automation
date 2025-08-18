@@ -96,8 +96,39 @@ Advanced functionality for the automation integration relies on uploading specif
 - **Event Detection**: Configure event detection via `events.json` 
 - **Device-Specific DBC**: Configure device-specific DBC decoding via `dbc-groups.json`
 - **Decryption**: Decrypt `MFE`, `MFM` files via `passwords.json` 
+- **Geofences**: Configure dynamic geofence definitions via `geofences.json`
 
 The `json-examples/` folder contains examples showing the structure of the above files. Details on these topics can be found in the CANedge Intro.
+
+### Geofence Configuration
+
+You can define custom geofences by uploading a `geofences.json` file to the input bucket. This file will be used by the `custom_geofences` function in `custom_message_functions.py` to dynamically load geofence definitions instead of using hardcoded values. To activate the creation of custom geofences, you will need to also add the `custom-messages.json` to your input bucket and reference the `custom_geofences` function.
+
+```json
+[
+    {
+        "id": 1,
+        "name": "Home Base",
+        "latitude": 56.072706,
+        "longitude": 10.103398,
+        "radius": 0.2
+    },
+    {
+        "id": 2,
+        "name": "Service Center",
+        "latitude": 56.116626,
+        "longitude": 10.154564,
+        "radius": 0.3
+    }
+]
+```
+
+Each geofence requires the following fields:
+- **id**: Numeric identifier for the geofence (used in the `GeofenceId` output signal)
+- **name**: Descriptive name for the geofence
+- **latitude**: Geographic latitude in decimal degrees (-90 to 90)
+- **longitude**: Geographic longitude in decimal degrees (-180 to 180)
+- **radius**: Radius of the geofence in kilometers (must be greater than 0)
 
 ---------
 

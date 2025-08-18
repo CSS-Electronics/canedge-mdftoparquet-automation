@@ -1,0 +1,26 @@
+[
+  {
+    "messages_filtered_list": "CAN1_DM01_DTC_",
+    "messages_match_type": "contains",
+    "raster": "",
+    "custom_message_name": "CAN1_CALC_DM01",
+    "prefix": false,
+    "function": "combine_dtcs"
+  },
+  {
+    "messages_filtered_list": "CAN2_DM01_DTC_",
+    "messages_match_type": "contains",
+    "raster": "",
+    "custom_message_name": "CAN2_CALC_DM01",
+    "prefix": false,
+    "function": "combine_dtcs"
+  },
+  {
+    "messages_filtered_list": [["CAN9_GnssPos"]],
+    "messages_match_type": "equals",
+    "raster": "",
+    "custom_message_name": "CAN9_CALC_CustomGeofences",
+    "prefix": false,
+    "function": "custom_geofences"
+  }
+]
