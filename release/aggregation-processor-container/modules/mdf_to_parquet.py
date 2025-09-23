@@ -1,6 +1,6 @@
 def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_input, bucket_output):
     from pathlib import Path
-    from .utils import DownloadObjects, DetectEvents, CreateCustomMessages, decode_log_file
+    from .utils import DownloadObjects, DetectEvents, CreateCustomMessages, decode_log_file, clean_tmp
     from .functions import process_decoded_data
     from .cloud_functions import get_log_file_object_paths
     import tempfile, os, logging
@@ -15,6 +15,9 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
 
     if len(log_file_object_paths) == 0:
         return False 
+    
+    # Clean up tmp directory
+    clean_tmp("/tmp", logger)
     
     with tempfile.TemporaryDirectory() as temp:       
         tmp_input_dir = Path(temp) / "input"
@@ -41,9 +44,9 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
                 
             # DBC decode MDF data to Parquet files
             logger.info(f"\n\nDBC DECODE MDF TO PARQUET")
-            decoder_result = decode_log_file(decoder, tmp_input_dir, tmp_output_dir, logger)
+            decoder_result, parquet_files_count = decode_log_file(decoder, tmp_input_dir, tmp_output_dir, logger)
             
-            if decoder_result:   
+            if decoder_result and parquet_files_count > 0:   
                 # If valid custom-messages.json, create custom Parquet messages 
                 logger.info(f"\n\nADD CUSTOM MESSAGES")
                 custom_messages = do.download_json_file("custom-messages.json")  
@@ -61,6 +64,10 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
     # Print and return the final result        
     if process_result:  
         result = {"statusCode": 200, "body": "Execution succeeded"}
+        logger.info(result)   
+        return result 
+    elif (decoder_result and parquet_files_count == 0):
+        result = {"statusCode": 200, "body": "Execution succeeded (no Parquet files decoded)"}
         logger.info(result)   
         return result 
     else:      

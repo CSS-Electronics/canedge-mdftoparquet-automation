@@ -1,6 +1,26 @@
 from .cloud_functions import download_object, list_objects, list_objects_with_pagination, upload_object, publish_notification
 
 # Class for downloading objects required by the Lambda
+def clean_tmp(base, logger):
+    import os, shutil
+    try:
+        logger.info("Listing contents of {base} dir:")
+        logger.info(os.listdir(base))
+        for name in os.listdir(base):
+            p = os.path.join(base, name)
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                else:
+                    os.remove(p)
+                logger.info("tmp directory cleaned")
+            except Exception as e:
+                logger.warning("tmp cleanup skipped %s: %s", p, e)
+    except FileNotFoundError:
+        logger.info(FileNotFoundError)
+        pass  
+        
+# Class for downloading objects required by the Lambda
 class DownloadObjects:
     def __init__(self, cloud, storage_client, bucket_input, tmp_input_dir, log_file_object_path, logger):
         self.logger = logger
@@ -148,6 +168,7 @@ def decode_log_file(decoder, tmp_input_dir, tmp_output_dir, logger):
     import subprocess, os, shutil
     
     fs_logfiles_path = tmp_input_dir / "logfiles" 
+    parquet_files_count = 0
     
     # Check if the logfiles folder contains any files
     logfiles = list(fs_logfiles_path.glob('*.*'))
@@ -168,10 +189,11 @@ def decode_log_file(decoder, tmp_input_dir, tmp_output_dir, logger):
         logger.error(f"MF4 decoding failed (returncode {subprocess_result.returncode})")
         result = False 
     else:
-        logger.info(f"MF4 decoding created {len(list(tmp_output_dir.rglob('*.*'))) } Parquet files")
+        parquet_files_count = len(list(tmp_output_dir.rglob('*.*')))
+        logger.info(f"MF4 decoding created {parquet_files_count} Parquet files")
         result = True 
 
-    return result
+    return result, parquet_files_count
 
 # -----------------------------------------------------------           
 # -----------------------------------------------------------
