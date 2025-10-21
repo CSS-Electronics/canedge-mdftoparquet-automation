@@ -3,6 +3,10 @@ from .cloud_functions import download_object, list_objects, list_objects_with_pa
 # Class for downloading objects required by the Lambda
 def clean_tmp(base, logger):
     import os, shutil
+    
+    # Define valid MDF file extensions
+    valid_extensions = ('.MF4', '.MFC', '.MFE', '.MFM')
+    
     try:
         logger.info("Listing contents of {base} dir:")
         logger.info(os.listdir(base))
@@ -11,11 +15,15 @@ def clean_tmp(base, logger):
             try:
                 if os.path.isdir(p):
                     shutil.rmtree(p)
-                else:
+                    logger.info(f"Removed directory: {p}")
+                elif name.upper().endswith(valid_extensions):
                     os.remove(p)
-                logger.info("tmp directory cleaned")
+                    logger.info(f"Removed file: {p}")
+                else:
+                    logger.info(f"Skipped file (not MDF): {p}")
             except Exception as e:
                 logger.warning("tmp cleanup skipped %s: %s", p, e)
+        logger.info("tmp directory cleaned")
     except FileNotFoundError:
         logger.info(FileNotFoundError)
         pass  
