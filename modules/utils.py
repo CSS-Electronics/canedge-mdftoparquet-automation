@@ -1,8 +1,8 @@
 from .cloud_functions import download_object, list_objects, list_objects_with_pagination, upload_object, publish_notification
 
-# Class for downloading objects required by the Lambda
+# Function for cleaning up temporary MDF files
 def clean_tmp(base, logger):
-    import os, shutil
+    import os
     
     # Define valid MDF file extensions
     valid_extensions = ('.MF4', '.MFC', '.MFE', '.MFM')
@@ -13,14 +13,13 @@ def clean_tmp(base, logger):
         for name in os.listdir(base):
             p = os.path.join(base, name)
             try:
-                if os.path.isdir(p):
-                    shutil.rmtree(p)
-                    logger.info(f"Removed directory: {p}")
-                elif name.upper().endswith(valid_extensions):
+                if os.path.isfile(p) and name.upper().endswith(valid_extensions):
                     os.remove(p)
-                    logger.info(f"Removed file: {p}")
-                else:
+                    logger.info(f"Removed MDF file: {p}")
+                elif os.path.isfile(p):
                     logger.info(f"Skipped file (not MDF): {p}")
+                elif os.path.isdir(p):
+                    logger.info(f"Skipped directory: {p}")
             except Exception as e:
                 logger.warning("tmp cleanup skipped %s: %s", p, e)
         logger.info("tmp directory cleaned")
