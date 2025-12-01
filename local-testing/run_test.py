@@ -137,8 +137,10 @@ def process_cloud_function(cloud, event):
             main.process_mdf_file(event)
             return True
         elif cloud == "Local":
-            import local_function
-            local_function.process_mdf_file(event)
+            from modules.mdf_to_parquet import mdf_to_parquet
+            input_bucket = os.environ.get('INPUT_BUCKET')
+            output_bucket = os.environ.get('OUTPUT_BUCKET')
+            mdf_to_parquet("Local", None, None, event, input_bucket, output_bucket)
             return True
         else:
             logger.error(f"Unsupported cloud provider: {cloud}")

@@ -162,5 +162,7 @@ def create_cloud_event(cloud, object_path, bucket_name):
             def __repr__(self):
                 return f"MockCloudEvent(data={self.data}, attributes={self.attributes})"
         return MockCloudEvent(data={'name': object_path})
+    elif cloud == "Local":
+        return {'object_path': object_path, 'bucket': bucket_name}
     else:
         raise ValueError(f"Unsupported cloud provider: {cloud}")

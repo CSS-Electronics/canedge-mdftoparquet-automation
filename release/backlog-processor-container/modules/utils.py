@@ -60,37 +60,37 @@ class DownloadObjects:
     def get_device_dbc_list(self,device_id):
         import json 
         
-        # If no match is found, the script simply applies all DBC files across any device ID
         device_dbc_list = [] 
-        if device_id != "":
-            fs_dbc_groups_file_path = self.tmp_input_dir / "dbc-groups.json"
+        fs_dbc_groups_file_path = self.tmp_input_dir / "dbc-groups.json"
+        
+        try:
+            object_found = download_object(self.cloud, self.storage_client, self.bucket_input, "dbc-groups.json", str(fs_dbc_groups_file_path), self.logger)
+            if object_found == False:
+                self.logger.info("No dbc-groups.json provided - applying all DBC files across all devices")
+                return device_dbc_list
+            
+            # dbc-groups.json exists, so device_id is required
+            if device_id == "":
+                self.logger.error("dbc-groups.json found but unable to extract device ID from log file path")
+                raise RuntimeError("Cannot continue: dbc-groups.json requires valid device ID in log file path")
+            
             try:
-                object_found = download_object(self.cloud, self.storage_client, self.bucket_input, "dbc-groups.json", str(fs_dbc_groups_file_path), self.logger)
-                if object_found == False:
-                    self.logger.info("No dbc-groups.json provided - applying all DBC files across all devices")
-                    return device_dbc_list
-                
-                try:
-                    with open(fs_dbc_groups_file_path, "r") as file:
-                        data = json.load(file)
+                with open(fs_dbc_groups_file_path, "r") as file:
+                    data = json.load(file)
 
-                    # Iterate over the groups in the JSON
-                    for group in data["dbc_groups"]:
-                        self.logger.info(f"Evaluating DBC group {group}")
-                        # Check if the device_id is in the current group
-                        if device_id in group["devices"]:
-                            # Add the dbc_files list to the variable
-                            device_dbc_list = group["dbc_files"]
-                            self.logger.info(f"Device specific DBC files: {device_dbc_list}")
-                            break
-                except json.JSONDecodeError as e:
-                    # If there's an error parsing the JSON file, log the error and exit
-                    self.logger.error(f"Error parsing dbc-groups.json - invalid JSON format: {e}")
-                    # Raise a fatal error to stop processing
-                    raise RuntimeError(f"Cannot continue: Invalid JSON in dbc-groups.json - {e}")
-            except Exception as e:
-                # Catch any other unexpected errors
-                self.logger.info(f"Unexpected error processing dbc-groups.json - applying all DBC files across all devices: {e}")
+                for group in data["dbc_groups"]:
+                    self.logger.info(f"Evaluating DBC group {group}")
+                    if device_id in group["devices"]:
+                        device_dbc_list = group["dbc_files"]
+                        self.logger.info(f"Device specific DBC files: {device_dbc_list}")
+                        break
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Error parsing dbc-groups.json - invalid JSON format: {e}")
+                raise RuntimeError(f"Cannot continue: Invalid JSON in dbc-groups.json - {e}")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            self.logger.info(f"Unexpected error processing dbc-groups.json - applying all DBC files across all devices: {e}")
         
         return device_dbc_list
                         
@@ -296,7 +296,7 @@ class DetectEvents:
         self.tmp_input_dir =  tmp_input_dir     
         self.tmp_output_dir =  tmp_output_dir     
     
-    def process_events(self, events):
+    def process_events(self, events, device_file):
         # If no events.json is found, exit early before importing modules
         if events == []:
             self.logger.info("No valid events.json found - skipping this step")
@@ -309,6 +309,9 @@ class DetectEvents:
         # Extract events list and general configuration
         general_cfg = events.get("general", {})
         events_cfg = events.get("events", [])
+        
+        # If valid device.json file, extract log_meta field
+        log_meta = device_file.get("log_meta", "") if isinstance(device_file, dict) else ""
                 
         # Get general event info incl. GPS details and SNS body content from the events JSON file
         messages_gps = general_cfg.get("messages_gps", ["CAN9_GnssPos"])
@@ -371,10 +374,12 @@ class DetectEvents:
                             
                             # Upon first identified 'rising edge' event, publish message to SNS topic
                             df_start_events = df_signal_event_meta[df_signal_event_meta["EventValue"] == 1]
-
+     
                             if message_sent == False and df_start_events.empty == False:
-                                subject = f"- EVENT: {event_name} | {device} | {df_start_events.index[0]}"
-                                body = f"{event_name} was triggered. {static_body_content}\n\nDetails:\n- device: {device}\n- message(s): {messages_filtered}\n- file: {file_name}\n- time: {df_start_events.index[0]}"
+                                device_info = f"{device} | {log_meta}" if log_meta else device
+                                event_time = df_start_events.index[0].strftime("%y%m%d %H:%M:%S") + " UTC"
+                                subject = f"- EVENT: {event_name} | {device_info} | {event_time}"
+                                body = f"{event_name} was triggered. {static_body_content}\n\nDetails:\n- device: {device_info}\n- message(s): {messages_filtered}\n- file: {file_name}\n- time: {event_time}"
                                 message_sent = self.publish_message(subject, body)
             
     # -----------------------------------------------

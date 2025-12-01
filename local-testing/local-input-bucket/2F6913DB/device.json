@@ -1,0 +1,21 @@
+{
+  "id": "2F6913DB",
+  "type": "0000007D",
+  "kpub": "xGr7KJEkUeA1ybr9w+wWS6dSerY22tp2TJBzbk2RYa2FOqTOfLgm0UGCttgYoV4yOBhnnnanmhl9+26Bj+/1iA==",
+  "fw_ver": "01.09.01",
+  "hw_ver": "00.03/00.01",
+  "cfg_ver": "01.09",
+  "cfg_name": "config-01.09.json",
+  "cfg_crc32": "D7FA04F6",
+  "sch_name": "schema-01.09.json",
+  "log_meta": "TestDevice",
+  "space_used_mb": "2/7572",
+  "sd_info": "00035344534130384780D6DD18A90175",
+  "sd_used_lifespan": "1",
+  "reset_cause": "",
+  "gnss_fw_ver": "2.16",
+  "cellular_fw_ver": "00.13_ENG0503,A00.01",
+  "cellular_iccid": "89971122127826563504",
+  "cellular_imei": "352505860345737",
+  "certs_server_md5": ["79E4A9840D7D3A96D7C04FE2434C892E", "E4A68AC854AC5242460AFD72481B2A44", "78F2FCAA601F2FB4EBC937BA532E7549", "8EADB501AA4D81E48C1DD1E114009519", "ACB694A59C17E0D791529BB19706A6E4", "7488547EBDCF2E95649DF9D2A2F6A214"]
+}

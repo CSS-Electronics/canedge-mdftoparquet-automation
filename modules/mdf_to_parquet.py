@@ -32,9 +32,10 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
         ccm = CreateCustomMessages(tmp_output_dir, logger, download_objects=do)
         de = DetectEvents(cloud, storage_client, notification_client, bucket_input, tmp_input_dir, tmp_output_dir, logger)
 
-        # Get device ID, device specific DBC list, DBC files, log file and passwords file
+        # Get device ID, device.json file, device specific DBC list, DBC files, log file and passwords file
         logger.info(f"\n\nDOWNLOAD OBJECTS")
         device_id = do.extract_device_id()
+        device_file = do.download_json_file(f"{device_id}/device.json")
         device_dbc_list = do.get_device_dbc_list(device_id)       
         dbc_result = do.download_dbc_files(device_dbc_list)
         if dbc_result:  
@@ -55,7 +56,7 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
                 # If valid events.json is found in S3 input bucket, detect events in decoded data
                 logger.info(f"\n\nDETECT EVENTS")
                 events = do.download_json_file("events.json")
-                de.process_events(events)       
+                de.process_events(events, device_file)       
                 
                 # Perform final processing of data 
                 logger.info(f"\n\nDO FINAL PROCESSING")

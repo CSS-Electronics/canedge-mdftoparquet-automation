@@ -68,6 +68,11 @@ def get_log_file_object_paths(cloud, event, logger):
                     file_name = event.data['name']
                     if has_valid_extension(file_name):
                         log_file_object_paths.append(Path(file_name))
+            elif cloud == "Local":
+                if isinstance(event, dict) and 'object_path' in event:
+                    file_name = event['object_path']
+                    if has_valid_extension(file_name):
+                        log_file_object_paths.append(Path(file_name))
             else:
                 logger.error(f"Unsupported cloud provider: {cloud}")
         
