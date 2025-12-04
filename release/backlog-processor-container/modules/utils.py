@@ -153,8 +153,10 @@ class DownloadObjects:
     # Check for and download JSON file if it exists
     def download_json_file(self, object_path):
         import json
+        from pathlib import Path
 
         fs_json_file_path = self.tmp_input_dir / object_path
+        Path(fs_json_file_path).parent.mkdir(parents=True, exist_ok=True)
         object_found = download_object(self.cloud, self.storage_client, self.bucket_input, object_path, str(fs_json_file_path), self.logger)
 
         if object_found == False:
