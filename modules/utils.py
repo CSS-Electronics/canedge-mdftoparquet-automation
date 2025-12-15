@@ -379,7 +379,7 @@ class DetectEvents:
      
                             if message_sent == False and df_start_events.empty == False:
                                 device_info = f"{device} | {log_meta}" if log_meta else device
-                                event_time = df_start_events.index[0].strftime("%y%m%d %H:%M:%S") + " UTC"
+                                event_time = df_start_events.index[0].strftime("%Y-%m-%d %H:%M:%S") + " UTC"
                                 subject = f"- EVENT: {event_name} | {device_info} | {event_time}"
                                 body = f"{event_name} was triggered. {static_body_content}\n\nDetails:\n- device: {device_info}\n- message(s): {messages_filtered}\n- file: {file_name}\n- time: {event_time}"
                                 message_sent = self.publish_message(subject, body)
