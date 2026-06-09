@@ -898,10 +898,11 @@ class ProcessBacklog:
     def process_mdf_batches(self, backlog_batches):
         """Process MDF batches using mdf_to_parquet"""
         from .mdf_to_parquet import mdf_to_parquet
-        
+        import gc
+
         total_items = sum(len(batch) for batch in backlog_batches)
         self.logger.info(f"Processing {len(backlog_batches)} batches with {total_items} unique objects in total")
-        
+
         # Process each batch
         batch_results = []
         for i, batch in enumerate(backlog_batches, 1):
@@ -910,19 +911,21 @@ class ProcessBacklog:
                 # Set up required parameters for mdf_to_parquet
                 notification_client = False  # ensures notifications are not sent for events during backlog processing
                 bucket_output = f"{self.bucket_input}-parquet"
-                
+
                 # For Amazon, initialize notification client
                 if self.cloud == "Amazon":
                     import boto3
                     notification_client = boto3.client('sns')
-                
+
                 # Call mdf_to_parquet directly
                 mdf_to_parquet(self.cloud, self.storage_client, notification_client, batch, self.bucket_input, bucket_output)
                 batch_results.append(True)
             except Exception as e:
                 self.logger.error(f"Error processing batch {i}: {e}")
                 batch_results.append(False)
-        
+            finally:
+                gc.collect()
+
         # Return the combined result (True if all batches succeeded)
         return all(batch_results)
     
