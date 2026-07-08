@@ -3,6 +3,7 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
     from .utils import DownloadObjects, DetectEvents, CreateCustomMessages, decode_log_file, clean_tmp
     from .functions import process_decoded_data
     from .cloud_functions import get_log_file_object_paths
+    from .routing import resolve_routing_rule
     import tempfile, os, logging
 
     logger = logging.getLogger()
@@ -56,11 +57,22 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
                 # If valid events.json is found in S3 input bucket, detect events in decoded data
                 logger.info(f"\n\nDETECT EVENTS")
                 events = do.download_json_file("events.json")
-                de.process_events(events, device_file)       
-                
-                # Perform final processing of data 
+                de.process_events(events, device_file)
+
+                # routing.json (per-customer output routing) is currently an AWS-only feature.
+                # On Google/Azure it is ignored so an uploaded routing.json has no effect (all data
+                # continues to the default bucket_output). Local is kept enabled for test fidelity.
+                routing_rule = None
+                if cloud in ("Amazon", "Local"):
+                    logger.info(f"\n\nLOAD ROUTING CONFIG")
+                    routing_config = do.download_json_file("routing.json")
+                    routing_rule = resolve_routing_rule(device_id, routing_config, logger)
+                else:
+                    logger.info(f"\n\nROUTING: routing.json is AWS-only in this release; ignoring (cloud={cloud})")
+
+                # Perform final processing of data
                 logger.info(f"\n\nDO FINAL PROCESSING")
-                process_result = process_decoded_data(cloud, storage_client, bucket_output, tmp_output_dir, logger)
+                process_result = process_decoded_data(cloud, storage_client, bucket_output, tmp_output_dir, logger, routing_rule)
     
     # Print and return the final result        
     if process_result:  

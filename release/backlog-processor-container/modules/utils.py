@@ -529,40 +529,63 @@ def get_messages_filtered_list(tmp_output_dir, data):
     return messages_filtered_list 
 
 # Upload all files in dir to cloud storage
-def upload_files_to_cloud(cloud, storage_client, bucket_output, dir):
+# bucket_output is the default (catch-all) output bucket. If routing_rule is provided (from an
+# optional routing.json), files recorded on/after the rule's from_date are routed to the rule's
+# output_bucket instead; all other files fall back to bucket_output. See modules/routing.py.
+def upload_files_to_cloud(cloud, storage_client, bucket_output, dir, routing_rule=None):
     from pathlib import Path
     import logging
     import os
-    
+    from .routing import resolve_target_bucket
+
     logger = logging.getLogger()
-    
+
     # Create list of all local Parquet files and count non-empty folders
     parquet_files = []
     non_empty_folders = 0
-    
+
     for folder in dir.glob("**"):
         if any(folder.glob("*")):
             non_empty_folders += 1
             for file in folder.glob("*.parquet"):
                 parquet_files.append(file)
-    
-    # Upload files to cloud storage
-    uploaded_files = 0    
+
+    # Upload files to cloud storage (routing to a per-customer bucket when a routing rule applies).
+    # If a routed (per-customer) upload fails - e.g. the customer bucket does not exist yet or a
+    # routing.json typo - fall back to the default bucket_output so decoded data is preserved and
+    # visible (the catch-all) rather than lost. Only a failure to write even to bucket_output counts
+    # as a real failure, which makes this return False so the caller raises (-> Lambda error -> SNS
+    # alert + S3 async retry) instead of silently reporting success.
+    uploaded_files = 0
+    failed_files = 0
+    routed_bucket_unavailable = False
     for file in parquet_files:
         relative_path = str(file.relative_to(dir)).replace(os.sep, '/')
-        upload_object(cloud, storage_client, bucket_output, relative_path, str(file), logger)
-        uploaded_files += 1
-        
+        target_bucket = resolve_target_bucket(relative_path, routing_rule, bucket_output, logger)
+
+        # Once a routed bucket is known-unavailable this invocation, send the rest straight to default
+        if routed_bucket_unavailable and target_bucket != bucket_output:
+            target_bucket = bucket_output
+
+        success = upload_object(cloud, storage_client, target_bucket, relative_path, str(file), logger)
+
+        # Fall back to the default catch-all bucket if a routed upload failed
+        if not success and target_bucket != bucket_output:
+            logger.warning(f"Routed upload to '{target_bucket}' failed - falling back to default bucket '{bucket_output}' (check the customer output bucket exists and routing.json is correct)")
+            routed_bucket_unavailable = True
+            success = upload_object(cloud, storage_client, bucket_output, relative_path, str(file), logger)
+
+        if success:
+            uploaded_files += 1
+        else:
+            failed_files += 1
+
     # Print results
-    logger.info(f"Uploaded {uploaded_files} Parquet files")
-    
-    # Return result
-    if uploaded_files > 0:
-        result = True
-    else:
-        result = False
-        
-    return result
+    logger.info(f"Uploaded {uploaded_files} Parquet files" + (f" | {failed_files} FAILED (incl. default-bucket fallback)" if failed_files else ""))
+
+    # Success only if every file reached a bucket; any hard failure returns False so the caller
+    # surfaces the error (retry + alerting) rather than silently reporting success.
+    return failed_files == 0 and uploaded_files > 0
 
 # -----------------------------------------------------------
 # Load Parquet file to data frame (optionally rename columns for uniqueness, optionally resample)
