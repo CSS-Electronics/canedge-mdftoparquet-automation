@@ -1,10 +1,15 @@
 {
-  "2F6913DB": {
-    "output_bucket": "myfleet-custa-parquet",
-    "from_date": "2026-05-01"
+  "config": {
+    "mirror_to_default": true
   },
-  "7512BE4D": {
-    "output_bucket": "myfleet-custb-parquet",
-    "from_date": "2024-01-01"
+  "devices": {
+    "2F6913DB": {
+      "output_bucket": "myfleet-custa-parquet",
+      "from_date": "2026-05-01"
+    },
+    "7512BE4D": {
+      "output_bucket": "myfleet-custb-parquet",
+      "from_date": "2024-01-01"
+    }
   }
 }

@@ -3,7 +3,7 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
     from .utils import DownloadObjects, DetectEvents, CreateCustomMessages, decode_log_file, clean_tmp
     from .functions import process_decoded_data
     from .cloud_functions import get_log_file_object_paths
-    from .routing import resolve_routing_rule
+    from .routing import resolve_routing_rule, resolve_mirror_to_default
     import tempfile, os, logging
 
     logger = logging.getLogger()
@@ -63,16 +63,18 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
                 # On Google/Azure it is ignored so an uploaded routing.json has no effect (all data
                 # continues to the default bucket_output). Local is kept enabled for test fidelity.
                 routing_rule = None
+                mirror_to_default = False
                 if cloud in ("Amazon", "Local"):
                     logger.info(f"\n\nLOAD ROUTING CONFIG")
                     routing_config = do.download_json_file("routing.json")
                     routing_rule = resolve_routing_rule(device_id, routing_config, logger)
+                    mirror_to_default = resolve_mirror_to_default(routing_config)
                 else:
                     logger.info(f"\n\nROUTING: routing.json is AWS-only in this release; ignoring (cloud={cloud})")
 
                 # Perform final processing of data
                 logger.info(f"\n\nDO FINAL PROCESSING")
-                process_result = process_decoded_data(cloud, storage_client, bucket_output, tmp_output_dir, logger, routing_rule)
+                process_result = process_decoded_data(cloud, storage_client, bucket_output, tmp_output_dir, logger, routing_rule, mirror_to_default)
     
     # Print and return the final result        
     if process_result:  

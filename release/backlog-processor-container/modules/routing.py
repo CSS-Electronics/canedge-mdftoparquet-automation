@@ -1,23 +1,47 @@
 # Optional per-device output routing (routing.json) - an advanced feature for multi-tenant setups.
 #
-# routing.json lives in the input bucket root and maps a device ID to a target output bucket plus
-# a recording-date cutoff:
+# routing.json lives in the input bucket root. It has a global "config" section and a "devices" map
+# from device ID to a target output bucket plus a recording-date cutoff:
 #
 #   {
-#     "2F6913DB": {"output_bucket": "myfleet-custA-parquet", "from_date": "2026-05-01"},
-#     "7512BE4D": {"output_bucket": "myfleet-custB-parquet", "from_date": "2024-01-01"}
+#     "config": {"mirror_to_default": false},
+#     "devices": {
+#       "2F6913DB": {"output_bucket": "myfleet-custA-parquet", "from_date": "2026-05-01"},
+#       "7512BE4D": {"output_bucket": "myfleet-custB-parquet", "from_date": "2024-01-01"}
+#     }
 #   }
 #
-# Behaviour (fully backward compatible): if routing.json is absent/empty/invalid, or a device is
-# not listed, or a rule is malformed, or a file's recording date precedes from_date, the data is
-# written to the DEFAULT output bucket (the base deployment's "<input>-parquet"). That default
-# bucket therefore acts as a visible catch-all for un-routed data (previous-owner stragglers,
-# unmapped devices, config errors) - nothing is silently discarded.
+# Behaviour: if routing.json is absent/empty/invalid, or a device is not listed, or a rule is
+# malformed, or a file's recording date precedes from_date, the data is written to the DEFAULT
+# output bucket (the base deployment's "<input>-parquet"). That default bucket therefore acts as a
+# visible catch-all for un-routed data (previous-owner stragglers, unmapped devices, config errors)
+# - nothing is silently discarded.
+#
+# "mirror_to_default" (global, default false) controls whether routed devices are ALSO copied to the
+# default bucket: false = route matched devices to their client bucket only; true = write matched
+# devices to both their client bucket AND the default bucket, so in-house / OEM admins can see all
+# devices in one lake (at the cost of duplicating that data). Catch-all files (no matching client
+# bucket) are always written to the default bucket exactly once - mirroring never double-writes them.
 #
 # "from_date" is the RECORDING date (taken from the decoded Parquet path), not the upload date.
 import re
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def resolve_mirror_to_default(routing_config):
+    """Return the global "mirror_to_default" flag from routing.json (default False).
+
+    When True, files for a routed (client) device are written to BOTH the client bucket and the
+    default bucket; when False, routed devices go to their client bucket only. Robust to an
+    absent/invalid config (download_json_file returns [] when routing.json is missing/invalid).
+    """
+    if not isinstance(routing_config, dict):
+        return False
+    config = routing_config.get("config")
+    if not isinstance(config, dict):
+        return False
+    return bool(config.get("mirror_to_default", False))
 
 
 def resolve_routing_rule(device_id, routing_config, logger):
@@ -34,7 +58,11 @@ def resolve_routing_rule(device_id, routing_config, logger):
     if not isinstance(routing_config, dict) or not routing_config:
         return None
 
-    rule = routing_config.get(device_id)
+    devices = routing_config.get("devices")
+    if not isinstance(devices, dict):
+        return None
+
+    rule = devices.get(device_id)
     if rule is None:
         logger.info(f"routing.json: device {device_id} not listed - using default output bucket (catch-all)")
         return None
@@ -81,3 +109,20 @@ def resolve_target_bucket(relative_path, routing_rule, default_bucket, logger):
         return default_bucket
 
     return routing_rule["output_bucket"]
+
+
+def resolve_target_buckets(relative_path, routing_rule, default_bucket, mirror_to_default, logger):
+    """Return the ordered, de-duplicated list of buckets a single decoded file is written to.
+
+    - Catch-all (no rule / date before from_date / unparseable path) -> [default_bucket] only, so a
+      file that belongs in the default bucket is never written there twice.
+    - Routed to a client bucket -> [client_bucket], plus default_bucket appended when
+      mirror_to_default is True (mirror the file into the shared default lake as well).
+    """
+    routed = resolve_target_bucket(relative_path, routing_rule, default_bucket, logger)
+    if routed == default_bucket:
+        return [default_bucket]
+    targets = [routed]
+    if mirror_to_default:
+        targets.append(default_bucket)
+    return targets

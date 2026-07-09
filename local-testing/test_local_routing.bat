@@ -26,9 +26,11 @@ echo Removing temporary routing.json...
 del "local-input-bucket\routing.json" >nul 2>&1
 
 echo.
-echo Verify the routed output folders (each device under its own bucket):
-echo   local-testing\local-input-bucket-custa-parquet\2F6913DB\...
-echo   local-testing\local-input-bucket-custb-parquet\7512BE4D\...
-echo (An unmapped device, or data before its from_date, would instead land in the catch-all
-echo  local-testing\local-input-bucket-parquet\ )
+echo Verify the output folders. routing-local-example.json sets mirror_to_default=true, so each
+echo mapped device appears in BOTH its client bucket AND the default (mirror) bucket:
+echo   local-testing\local-input-bucket-custa-parquet\2F6913DB\...            (client)
+echo   local-testing\local-input-bucket-custb-parquet\7512BE4D\...            (client)
+echo   local-testing\local-input-bucket-parquet\2F6913DB\... and \7512BE4D\... (mirror)
+echo (With mirror_to_default=false, mapped devices appear only in their client bucket; an unmapped
+echo  device, or data before its from_date, always lands in the catch-all local-input-bucket-parquet.)
 endlocal

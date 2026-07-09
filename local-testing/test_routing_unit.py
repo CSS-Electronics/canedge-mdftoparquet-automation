@@ -2,7 +2,8 @@
 """Unit tests for the optional routing.json resolver (modules/routing.py).
 
 Deterministic checks of the routing decisions - rule resolution, the recording-date cutoff, the
-catch-all fallback, and malformed-config handling - without needing to decode real MDF files.
+catch-all fallback, malformed-config handling, the global mirror_to_default flag, and the resulting
+per-file target-bucket list - without needing to decode real MDF files.
 
 Run:  python local-testing/test_routing_unit.py
 """
@@ -11,17 +12,25 @@ import sys
 import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from modules.routing import resolve_routing_rule, resolve_target_bucket  # noqa: E402
+from modules.routing import (  # noqa: E402
+    resolve_routing_rule,
+    resolve_target_bucket,
+    resolve_target_buckets,
+    resolve_mirror_to_default,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("routing-unit")
 
 DEFAULT = "myfleet-parquet"
 CONFIG = {
-    "2F6913DB": {"output_bucket": "myfleet-custa-parquet", "from_date": "2026-05-01"},
-    "7512BE4D": {"output_bucket": "myfleet-custb-parquet"},               # no from_date => any date
-    "BADRULE1": {"from_date": "2020-01-01"},                             # missing output_bucket
-    "BADDATE1": {"output_bucket": "x-parquet", "from_date": "May 2026"},  # malformed from_date
+    "config": {"mirror_to_default": True},
+    "devices": {
+        "2F6913DB": {"output_bucket": "myfleet-custa-parquet", "from_date": "2026-05-01"},
+        "7512BE4D": {"output_bucket": "myfleet-custb-parquet"},               # no from_date => any date
+        "BADRULE1": {"from_date": "2020-01-01"},                             # missing output_bucket
+        "BADDATE1": {"output_bucket": "x-parquet", "from_date": "May 2026"},  # malformed from_date
+    },
 }
 
 _failures = []
@@ -38,6 +47,7 @@ def check(name, got, exp):
 print("resolve_routing_rule:")
 check("absent config ([] from download_json_file)", resolve_routing_rule("2F6913DB", [], log), None)
 check("empty config ({})", resolve_routing_rule("2F6913DB", {}, log), None)
+check("config without devices -> None", resolve_routing_rule("2F6913DB", {"config": {"mirror_to_default": True}}, log), None)
 check("unmapped device -> None", resolve_routing_rule("DEADBEEF", CONFIG, log), None)
 check("missing output_bucket -> None", resolve_routing_rule("BADRULE1", CONFIG, log), None)
 check("malformed from_date -> None", resolve_routing_rule("BADDATE1", CONFIG, log), None)
@@ -45,6 +55,16 @@ check("valid with from_date", resolve_routing_rule("2F6913DB", CONFIG, log),
       {"output_bucket": "myfleet-custa-parquet", "from_date": "2026-05-01"})
 check("valid without from_date", resolve_routing_rule("7512BE4D", CONFIG, log),
       {"output_bucket": "myfleet-custb-parquet", "from_date": ""})
+
+print("resolve_mirror_to_default:")
+check("absent config ([]) -> False", resolve_mirror_to_default([]), False)
+check("empty config ({}) -> False", resolve_mirror_to_default({}), False)
+check("config section missing -> False", resolve_mirror_to_default({"devices": {}}), False)
+check("config not a dict -> False", resolve_mirror_to_default({"config": "nope"}), False)
+check("flag absent -> False", resolve_mirror_to_default({"config": {}}), False)
+check("flag false -> False", resolve_mirror_to_default({"config": {"mirror_to_default": False}}), False)
+check("flag true -> True", resolve_mirror_to_default({"config": {"mirror_to_default": True}}), True)
+check("full CONFIG -> True", resolve_mirror_to_default(CONFIG), True)
 
 ruleA = resolve_routing_rule("2F6913DB", CONFIG, log)   # from_date 2026-05-01
 ruleB = resolve_routing_rule("7512BE4D", CONFIG, log)   # no from_date
@@ -60,6 +80,17 @@ check("before cutoff -> default catch-all", resolve_target_bucket(p_before, rule
 check("event-table path routes by date", resolve_target_bucket(p_event, ruleA, DEFAULT, log), "myfleet-custa-parquet")
 check("no from_date routes any date", resolve_target_bucket(p_before, ruleB, DEFAULT, log), "myfleet-custb-parquet")
 check("unparseable path -> default", resolve_target_bucket("weird.parquet", ruleA, DEFAULT, log), DEFAULT)
+
+print("resolve_target_buckets (mirror off):")
+check("catch-all (no rule) -> [default]", resolve_target_buckets(p_after, None, DEFAULT, False, log), [DEFAULT])
+check("routed -> [client] only", resolve_target_buckets(p_after, ruleA, DEFAULT, False, log), ["myfleet-custa-parquet"])
+check("before cutoff -> [default]", resolve_target_buckets(p_before, ruleA, DEFAULT, False, log), [DEFAULT])
+
+print("resolve_target_buckets (mirror on):")
+check("catch-all (no rule) -> [default] once", resolve_target_buckets(p_after, None, DEFAULT, True, log), [DEFAULT])
+check("routed -> [client, default]", resolve_target_buckets(p_after, ruleA, DEFAULT, True, log), ["myfleet-custa-parquet", DEFAULT])
+check("before cutoff -> [default] once (no double)", resolve_target_buckets(p_before, ruleA, DEFAULT, True, log), [DEFAULT])
+check("unparseable path -> [default] once", resolve_target_buckets("weird.parquet", ruleA, DEFAULT, True, log), [DEFAULT])
 
 if _failures:
     print(f"\n{len(_failures)} FAILED: {_failures}")

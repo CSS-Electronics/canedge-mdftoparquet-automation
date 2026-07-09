@@ -531,12 +531,14 @@ def get_messages_filtered_list(tmp_output_dir, data):
 # Upload all files in dir to cloud storage
 # bucket_output is the default (catch-all) output bucket. If routing_rule is provided (from an
 # optional routing.json), files recorded on/after the rule's from_date are routed to the rule's
-# output_bucket instead; all other files fall back to bucket_output. See modules/routing.py.
-def upload_files_to_cloud(cloud, storage_client, bucket_output, dir, routing_rule=None):
+# output_bucket instead; all other files fall back to bucket_output. When mirror_to_default is True,
+# routed files are ALSO written to bucket_output (catch-all files are still written there just once).
+# See modules/routing.py.
+def upload_files_to_cloud(cloud, storage_client, bucket_output, dir, routing_rule=None, mirror_to_default=False):
     from pathlib import Path
     import logging
     import os
-    from .routing import resolve_target_bucket
+    from .routing import resolve_target_buckets
 
     logger = logging.getLogger()
 
@@ -550,32 +552,44 @@ def upload_files_to_cloud(cloud, storage_client, bucket_output, dir, routing_rul
             for file in folder.glob("*.parquet"):
                 parquet_files.append(file)
 
-    # Upload files to cloud storage (routing to a per-customer bucket when a routing rule applies).
+    # Upload files to cloud storage (routing to a per-customer bucket when a routing rule applies,
+    # and additionally mirroring routed files to the default bucket when mirror_to_default is set).
     # If a routed (per-customer) upload fails - e.g. the customer bucket does not exist yet or a
     # routing.json typo - fall back to the default bucket_output so decoded data is preserved and
-    # visible (the catch-all) rather than lost. Only a failure to write even to bucket_output counts
-    # as a real failure, which makes this return False so the caller raises (-> Lambda error -> SNS
-    # alert + S3 async retry) instead of silently reporting success.
+    # visible (the catch-all) rather than lost. A file counts as uploaded once it reaches at least
+    # one bucket, so a failed mirror copy (the client write already succeeded) is non-fatal; a file
+    # that reaches no bucket is a real failure, which makes this return False so the caller raises
+    # (-> Lambda error -> SNS alert + S3 async retry) instead of silently reporting success.
     uploaded_files = 0
     failed_files = 0
     routed_bucket_unavailable = False
     for file in parquet_files:
         relative_path = str(file.relative_to(dir)).replace(os.sep, '/')
-        target_bucket = resolve_target_bucket(relative_path, routing_rule, bucket_output, logger)
+        targets = resolve_target_buckets(relative_path, routing_rule, bucket_output, mirror_to_default, logger)
 
-        # Once a routed bucket is known-unavailable this invocation, send the rest straight to default
-        if routed_bucket_unavailable and target_bucket != bucket_output:
-            target_bucket = bucket_output
+        # Once a routed (client) bucket is known-unavailable this invocation, stop retrying it and
+        # rely on the default bucket (drop the client target; keep default so data is still written).
+        if routed_bucket_unavailable:
+            targets = [t for t in targets if t == bucket_output] or [bucket_output]
 
-        success = upload_object(cloud, storage_client, target_bucket, relative_path, str(file), logger)
+        reached_bucket = False       # file landed in at least one bucket (data not lost)
+        routed_write_failed = False  # a client-bucket write failed for this file
+        for target_bucket in targets:
+            if upload_object(cloud, storage_client, target_bucket, relative_path, str(file), logger):
+                reached_bucket = True
+            elif target_bucket != bucket_output:
+                routed_write_failed = True
 
-        # Fall back to the default catch-all bucket if a routed upload failed
-        if not success and target_bucket != bucket_output:
-            logger.warning(f"Routed upload to '{target_bucket}' failed - falling back to default bucket '{bucket_output}' (check the customer output bucket exists and routing.json is correct)")
+        # Fall back to the default catch-all bucket if a routed upload failed and default was not
+        # already a target (mirror mode already writes default, so this never double-writes it).
+        if routed_write_failed:
             routed_bucket_unavailable = True
-            success = upload_object(cloud, storage_client, bucket_output, relative_path, str(file), logger)
+            if bucket_output not in targets:
+                logger.warning(f"Routed upload failed - falling back to default bucket '{bucket_output}' (check the customer output bucket exists and routing.json is correct)")
+                if upload_object(cloud, storage_client, bucket_output, relative_path, str(file), logger):
+                    reached_bucket = True
 
-        if success:
+        if reached_bucket:
             uploaded_files += 1
         else:
             failed_files += 1
