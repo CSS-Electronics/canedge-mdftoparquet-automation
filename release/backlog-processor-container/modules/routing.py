@@ -34,14 +34,15 @@ def resolve_mirror_to_default(routing_config):
 
     When True, files for a routed (client) device are written to BOTH the client bucket and the
     default bucket; when False, routed devices go to their client bucket only. Robust to an
-    absent/invalid config (download_json_file returns [] when routing.json is missing/invalid).
+    absent config (load_control_file returns None when routing.json is missing). Only a JSON true
+    enables mirroring (a string such as "false" is rejected by control_files.py).
     """
     if not isinstance(routing_config, dict):
         return False
     config = routing_config.get("config")
     if not isinstance(config, dict):
         return False
-    return bool(config.get("mirror_to_default", False))
+    return config.get("mirror_to_default", False) is True
 
 
 def resolve_routing_rule(device_id, routing_config, logger):
@@ -54,7 +55,7 @@ def resolve_routing_rule(device_id, routing_config, logger):
     Returns a validated {"output_bucket", "from_date"} dict, or None to mean "use the default
     output bucket" (which covers absent/empty/invalid routing.json and unmapped devices).
     """
-    # download_json_file returns [] when the file is absent or invalid JSON
+    # load_control_file returns None when the file is absent (an invalid file stops the processing)
     if not isinstance(routing_config, dict) or not routing_config:
         return None
 

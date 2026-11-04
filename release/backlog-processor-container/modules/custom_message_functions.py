@@ -13,7 +13,7 @@ def apply_custom_function(df_messages, function, download_objects=None):
     # Example 2: Add custom geofences 
     if function == "custom_geofences":
         try:
-            geofences_data = download_objects.download_json_file("geofences.json")
+            geofences_data = download_objects.load_control_file("geofences.json", "no geofences (GeofenceId is 0)") or []
             
             # Convert geofences from JSON format to tuple format used by check_geofence
             geofences = [(

@@ -8,6 +8,7 @@ import sys
 import tempfile
 from modules.cloud_functions import upload_object, list_objects, download_object, list_objects_with_pagination
 from modules.utils import DownloadObjects
+from modules.control_files import ControlFileError
 
 class AggregateData:
     """
@@ -58,12 +59,16 @@ class AggregateData:
                     self.logger
                 )
                 
-                config = do.download_json_file(self.aggregations_file)
+                config = do.load_control_file(self.aggregations_file, "nothing to process", required=True)
+                if config is None:
+                    return None
                 self.logger.info(f"Aggregation Configuration File: {config}")
                 self._extract_config_parameters(config)
                 
                 return config
                 
+        except ControlFileError:
+            return None
         except Exception as e:
             self.logger.error(f"Error loading JSON file: {e}")
             return None
@@ -478,9 +483,9 @@ class AggregateData:
     
         config = self.load_aggregation_json()
       
-        if not config or config == []:
+        if not config:
             self.logger.error("No valid configuration to process")
-            return 0
+            return None
             
         days_processed = 0
         total_days = (self.end_date - self.start_date).days + 1

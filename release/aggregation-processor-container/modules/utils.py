@@ -1,4 +1,5 @@
 from .cloud_functions import download_object, list_objects, list_objects_with_pagination, upload_object, publish_notification
+from .control_files import classify_backlog_entry
 
 # Function for cleaning up temporary MDF files
 def clean_tmp(base, logger):
@@ -55,43 +56,28 @@ class DownloadObjects:
         
         return device_id
     
-    # -----------------------------------------------    
+    # -----------------------------------------------
     # Download dbc-groups.json file (if it exists) and use device ID to extract relevant DBC list
     def get_device_dbc_list(self,device_id):
-        import json 
-        
-        device_dbc_list = [] 
-        fs_dbc_groups_file_path = self.tmp_input_dir / "dbc-groups.json"
-        
-        try:
-            object_found = download_object(self.cloud, self.storage_client, self.bucket_input, "dbc-groups.json", str(fs_dbc_groups_file_path), self.logger)
-            if object_found == False:
-                self.logger.info("No dbc-groups.json provided - applying all DBC files across all devices")
-                return device_dbc_list
-            
-            # dbc-groups.json exists, so device_id is required
-            if device_id == "":
-                self.logger.error("dbc-groups.json found but unable to extract device ID from log file path")
-                raise RuntimeError("Cannot continue: dbc-groups.json requires valid device ID in log file path")
-            
-            try:
-                with open(fs_dbc_groups_file_path, "r") as file:
-                    data = json.load(file)
+        device_dbc_list = []
+        data = self.load_control_file("dbc-groups.json", "applying all DBC files across all devices")
+        if data is None:
+            return device_dbc_list
 
-                for group in data["dbc_groups"]:
-                    self.logger.info(f"Evaluating DBC group {group}")
-                    if device_id in group["devices"]:
-                        device_dbc_list = group["dbc_files"]
-                        self.logger.info(f"Device specific DBC files: {device_dbc_list}")
-                        break
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Error parsing dbc-groups.json - invalid JSON format: {e}")
-                raise RuntimeError(f"Cannot continue: Invalid JSON in dbc-groups.json - {e}")
-        except RuntimeError:
-            raise
-        except Exception as e:
-            self.logger.info(f"Unexpected error processing dbc-groups.json - applying all DBC files across all devices: {e}")
-        
+        # dbc-groups.json exists, so device_id is required
+        if device_id == "":
+            self.logger.error("dbc-groups.json found but unable to extract device ID from log file path")
+            raise RuntimeError("Cannot continue: dbc-groups.json requires valid device ID in log file path")
+
+        for group in data["dbc_groups"]:
+            self.logger.info(f"Evaluating DBC group {group}")
+            if device_id in group["devices"]:
+                device_dbc_list = group["dbc_files"]
+                self.logger.info(f"Device specific DBC files: {device_dbc_list}")
+                break
+        else:
+            self.logger.info(f"Device {device_id} is not in dbc-groups.json - applying all DBC files")
+
         return device_dbc_list
                         
     # -----------------------------------------------
@@ -169,7 +155,29 @@ class DownloadObjects:
         except Exception as e:
             self.logger.info(f"{object_path} found in {self.bucket_input}, but the JSON appears invalid: {str(e)}")
             return []
-        
+
+    # -----------------------------------------------
+    # Download and validate an optional control file from the input bucket root (see control_files.py)
+    # Missing: returns None (feature off). Present but invalid: logs CONTROL FILE ERROR lines and raises.
+    # required=True (the input of a backlog/aggregation job): a missing file is logged as an error
+    def load_control_file(self, name, missing_note="feature off", required=False):
+        from .control_files import check
+
+        fs_file_path = self.tmp_input_dir / name
+        object_found = download_object(self.cloud, self.storage_client, self.bucket_input, name, str(fs_file_path), self.logger, supress=True)
+        if object_found == False:
+            if required:
+                self.logger.error(f"No {name} found in the input {'container' if self.cloud == 'Azure' else 'bucket'} root - {missing_note}")
+            else:
+                self.logger.info(f"{name} not found - {missing_note}")
+            return None
+
+        with open(fs_file_path, "rb") as f:
+            input_bucket = self.bucket_input if self.cloud != "Local" else None   # Local: a folder path, not a name
+            data = check(name, f.read(), self.logger, cloud=self.cloud, input_bucket=input_bucket)
+        self.logger.info(f"{name} found and valid")
+        return data
+
 
 # -----------------------------------------------
 # DBC decode MDF file to Parquet via MF4 decoder
@@ -183,7 +191,7 @@ def decode_log_file(decoder, tmp_input_dir, tmp_output_dir, logger):
     logfiles = list(fs_logfiles_path.glob('*.*'))
     if not logfiles:
         logger.error("No log files available for decoding")
-        return False
+        return False, 0
     
     # Handle both absolute and relative paths for the decoder
     if os.path.isabs(decoder):
@@ -215,9 +223,8 @@ class CreateCustomMessages:
     
     def create_custom_messages(self, custom_messages):
         # If no custom-messages.json is found, exit early before importing modules
-        if custom_messages == []:
-            self.logger.info("No valid custom-messages.json found - skipping this step")
-            return 
+        if not custom_messages:
+            return
             
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -254,8 +261,13 @@ class CreateCustomMessages:
                         self.logger.info(f"- Decoded file found, but data frame is empty (typically due to short file): {(messages_filtered, device, date, file_name)}")
                         continue 
                     
-                    # Update data frame by applying apply custom functions 
-                    df_messages = apply_custom_function(df_messages, custom_message["function"], self.download_objects)
+                    # Update data frame by applying apply custom functions
+                    try:
+                        df_messages = apply_custom_function(df_messages, custom_message["function"], self.download_objects)
+                    except KeyError as e:
+                        raise_control_file_error("custom-messages.json", f"[{idx - 1}] ({custom_message_name})",
+                            f"function '{custom_message['function']}' needs the column {e} - not in message(s) {messages} "
+                            f"(columns: {', '.join(map(str, df_messages.columns))})", self.logger)
                                       
                     # Write the new custom file as Parquet to unique path                     
                     custom_file = self.tmp_output_dir / device / custom_message_name / date / file_name 
@@ -300,9 +312,8 @@ class DetectEvents:
     
     def process_events(self, events, device_file):
         # If no events.json is found, exit early before importing modules
-        if events == []:
-            self.logger.info("No valid events.json found - skipping this step")
-            return 
+        if not events:
+            return
             
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -328,15 +339,15 @@ class DetectEvents:
         
         # Loop through each event
         for idx, event in enumerate(events_cfg, start=1):
-            event_name = event["event_name"]   
-            messages_filtered_list = get_messages_filtered_list(self.tmp_output_dir, event)[0]
+            event_name = event["event_name"]
+            # All messages of all lists, without duplicates (each message is evaluated on its own)
+            messages_filtered_list = list(dict.fromkeys(m for messages in get_messages_filtered_list(self.tmp_output_dir, event) for m in messages))
 
             self.logger.info(f"Processing event {idx}/{len(events_cfg)}: {event_name}")
             self.logger.info(f"- Input messages: {messages_filtered_list}")
             message_sent = False
                         
-            # Loop through each input message per event 
-            # Note: The use of [0] forces the script to evaluate lists of messages one-by-one
+            # Loop through each input message per event (messages are evaluated one-by-one)
             for messages_filtered in messages_filtered_list:
                 messages_filtered = [messages_filtered]
                 
@@ -357,7 +368,11 @@ class DetectEvents:
                 
                     # Loop through each trigger signal for the event
                     for trigger_signal in event["trigger_signals"]:
-                        
+                        if trigger_signal not in df_messages.columns:
+                            raise_control_file_error("events.json", f"events[{idx - 1}] ({event_name})",
+                                f"trigger signal '{trigger_signal}' is not in message(s) {messages} "
+                                f"(columns: {', '.join(map(str, df_messages.columns))})", self.logger)
+
                         # Test if trigger signal value crosses event thresholds. If so, extract the start/stop event-related subset of data. If empty, skip
                         df_signal_event = self.create_df_signal_event(trigger_signal, event, df_messages)                      
                         if df_signal_event.empty:
@@ -523,10 +538,19 @@ def get_messages_filtered_list(tmp_output_dir, data):
     if data["messages_match_type"] == "equals":
         messages_filtered_list = data["messages_filtered_list"]
     elif data["messages_match_type"] == "contains":
-        messages_filtered_list = [[path.parts[-5] for path in tmp_output_dir.rglob(f'*/*{data["messages_filtered_list"]}*/**/*.parquet') or [None]]]
+        # One entry per matching message (not per Parquet file)
+        messages_filtered_list = [list(dict.fromkeys(path.parts[-5] for path in tmp_output_dir.rglob(f'*/*{data["messages_filtered_list"]}*/**/*.parquet')))]
     elif data["messages_match_type"] == "all_messages":
         messages_filtered_list = [["ALL"]]
-    return messages_filtered_list 
+    else:
+        raise ValueError(f"Unsupported messages_match_type: {data['messages_match_type']!r} (use equals, contains or all_messages)")
+    return messages_filtered_list
+
+# -----------------------------------------------
+# Log a control file problem found while processing (e.g. a signal that is not in the decoded data) and stop
+def raise_control_file_error(name, path, message, logger):
+    from .control_files import Issue, report
+    report(name, [Issue("error", path, message)], logger)
 
 # Upload all files in dir to cloud storage
 # bucket_output is the default (catch-all) output bucket. If routing_rule is provided (from an
@@ -700,71 +724,26 @@ class ProcessBacklog:
         self.max_batch_size = max_batch_size
         
     def download_backlog_json(self):
-        """Download backlog.json from the root of the input bucket/container"""
+        """Download and validate backlog.json from the root of the input bucket/container (see control_files.py)"""
         import tempfile
-        import json
         from pathlib import Path
-        
+        from .control_files import ControlFileError
+
+        self.logger.info(f"Downloading backlog.json from {self.cloud} storage: {self.bucket_input}")
         with tempfile.TemporaryDirectory() as temp:
-            tmp_dir = Path(temp)
-            backlog_file_path = tmp_dir / "backlog.json"
-            
-            self.logger.info(f"Downloading backlog.json from {self.cloud} storage: {self.bucket_input}")
-            object_found = download_object(self.cloud, self.storage_client, self.bucket_input, "backlog.json", str(backlog_file_path), self.logger)
-            
-            if not object_found:
-                self.logger.error(f"No backlog.json found in the root of the {self.cloud} input {('bucket' if self.cloud != 'Azure' else 'container')}")
-                return None
-            
+            do = DownloadObjects(self.cloud, self.storage_client, self.bucket_input, Path(temp), "", self.logger)
             try:
-                with open(backlog_file_path, "r") as f:
-                    data = json.load(f)
-                    
-                    # Require the new JSON format with config fields
-                    if not isinstance(data, dict):
-                        self.logger.error("Invalid backlog.json format: expected an object with 'config' and 'files' properties")
-                        return None
-                        
-                    # Check required fields
-                    if "files" not in data:
-                        self.logger.error("Invalid backlog.json format: missing 'files' property")
-                        return None
-                        
-                    if "config" not in data:
-                        self.logger.error("Invalid backlog.json format: missing 'config' property")
-                        return None
-                        
-                    if "batch_size" not in data["config"]:
-                        self.logger.error("Invalid backlog.json format: missing 'batch_size' in config")
-                        return None
-                        
-                    # Get files list
-                    backlog_file_data = data["files"]
-                    self.logger.info(f"Using backlog.json with {len(backlog_file_data)} items")
-                    
-                    # Extract batch size parameters from config
-                    batch_config = data["config"]["batch_size"]
-                    
-                    if "min" not in batch_config:
-                        self.logger.error("Invalid backlog.json format: missing 'min' in batch_size config")
-                        return None
-                        
-                    if "max" not in batch_config:
-                        self.logger.error("Invalid backlog.json format: missing 'max' in batch_size config")
-                        return None
-                    
-                    # Set batch size parameters
-                    self.min_batch_size = batch_config["min"]
-                    self.max_batch_size = batch_config["max"]
-                    self.logger.info(f"Using batch_size parameters from config: min={self.min_batch_size}, max={self.max_batch_size}")
-                        
-                    return backlog_file_data
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Error parsing backlog.json - invalid JSON format: {e}")
+                data = do.load_control_file("backlog.json", "nothing to process", required=True)
+            except ControlFileError:
                 return None
-            except Exception as e:
-                self.logger.error(f"Error reading backlog.json: {e}")
-                return None
+        if data is None:
+            return None
+
+        # Set batch size parameters
+        self.min_batch_size = data["config"]["batch_size"]["min"]
+        self.max_batch_size = data["config"]["batch_size"]["max"]
+        self.logger.info(f"Using backlog.json with {len(data['files'])} items and batch_size min={self.min_batch_size}, max={self.max_batch_size}")
+        return data["files"]
         
     def has_valid_extension(self, filename):
         """Check if a file has a valid extension"""
@@ -880,58 +859,42 @@ class ProcessBacklog:
             self.logger.error("Failed to load backlog.json - exiting")
             return False
         
-        # Prepare batches
+        # Prepare batches (one per session), then group them per device
         self.logger.info(f"\n\nBACKLOG: PREPARE BATCHES")
-        backlog_data_list = [backlog_file_data]
-        total_items = len(backlog_file_data)
-        self.logger.info(f"Backlog file contains {total_items} items")
-        
-        # Process the backlog to get batches
-        backlog_batches = self.process_backlog(backlog_data_list)
-        
-        # Optimization: Combine batches from the same device with size constraints
-        # This avoids processing small batches separately when it's more efficient to process them together
-        # But ensures we don't combine files from different devices or exceed max batch size
-        if len(backlog_batches) > 1 and total_items < self.min_batch_size:
-            self.logger.info(f"Optimizing by combining small batches from the same device (min_batch_size={self.min_batch_size}, max_batch_size={self.max_batch_size})")
-            # Group batches by device ID
-            device_batches = {}
-            for batch in backlog_batches:
-                if not batch:  # Skip empty batches
-                    continue
-                # Extract device ID from first file in batch (device ID is the first part of the path)
-                first_file = batch[0]
-                device_id = first_file.split('/')[0] if '/' in first_file else None
-                
-                if device_id:
-                    # Initialize device batch list if needed
-                    if device_id not in device_batches:
-                        device_batches[device_id] = []
-                    # Add all files from this batch to the device batch
-                    device_batches[device_id].extend(batch)
-                else:
-                    # If we can't identify the device, keep the batch separate
-                    device_batches[f"unknown_{len(device_batches)}"] = batch
-            
-            # Now split any device batches that exceed max_batch_size
-            final_batches = []
-            for device_id, files in device_batches.items():
-                # If batch exceeds max size, split it into smaller batches
-                if len(files) > self.max_batch_size:
-                    self.logger.info(f"Device {device_id} has {len(files)} files, exceeding max_batch_size of {self.max_batch_size}. Splitting into multiple batches.")
-                    for i in range(0, len(files), self.max_batch_size):
-                        batch_slice = files[i:i + self.max_batch_size]
-                        final_batches.append(batch_slice)
-                else:
-                    final_batches.append(files)
-            
-            # Replace the original batches with the device-grouped and size-limited batches
-            backlog_batches = final_batches
-            self.logger.info(f"Optimized into {len(backlog_batches)} device-specific batches with size limits applied")
+        backlog_batches = self.process_backlog([backlog_file_data])
+        backlog_batches = self.group_batches(backlog_batches)
         
         # Process the MDF batches
         return self.process_mdf_batches(backlog_batches)
     
+    def group_batches(self, session_batches):
+        """Group the per-session file lists into batches (never across devices):
+        - Sessions with fewer than min_batch_size files are merged with other small sessions of the same device,
+          up to max_batch_size files per batch (efficient for many sessions with 1-2 files)
+        - Sessions with min_batch_size or more files are their own batch
+        - Any batch above max_batch_size files is split"""
+        batches_by_device = {}
+        for files in session_batches:
+            if files:
+                batches_by_device.setdefault(files[0].split('/')[0], []).append(files)
+
+        final_batches = []
+        for device_id, sessions in batches_by_device.items():
+            small = []
+            for files in sessions:
+                if len(files) < self.min_batch_size:
+                    if small and len(small) + len(files) > self.max_batch_size:
+                        final_batches.append(small)
+                        small = []
+                    small.extend(files)
+                else:
+                    final_batches.extend(files[i:i + self.max_batch_size] for i in range(0, len(files), self.max_batch_size))
+            if small:
+                final_batches.extend(small[i:i + self.max_batch_size] for i in range(0, len(small), self.max_batch_size))
+
+        self.logger.info(f"Grouped {len(session_batches)} sessions into {len(final_batches)} batches (min_batch_size={self.min_batch_size}, max_batch_size={self.max_batch_size})")
+        return final_batches
+
     def process_mdf_batches(self, backlog_batches):
         """Process MDF batches using mdf_to_parquet"""
         from .mdf_to_parquet import mdf_to_parquet
@@ -946,13 +909,8 @@ class ProcessBacklog:
             self.logger.info(f"\n\n\nBACKLOG: PROCESS BATCH {i} OF {len(backlog_batches)} ({len(batch)} OBJECTS)")
             try:
                 # Set up required parameters for mdf_to_parquet
-                notification_client = False  # ensures notifications are not sent for events during backlog processing
+                notification_client = False  # no event notifications during backlog processing (all clouds)
                 bucket_output = f"{self.bucket_input}-parquet"
-
-                # For Amazon, initialize notification client
-                if self.cloud == "Amazon":
-                    import boto3
-                    notification_client = boto3.client('sns')
 
                 # Call mdf_to_parquet directly
                 mdf_to_parquet(self.cloud, self.storage_client, notification_client, batch, self.bucket_input, bucket_output)
@@ -977,12 +935,13 @@ class ProcessBacklog:
             session_lists = {}
             
             for original_item in entry_list:
-                # Normalize the item once, at the beginning of processing
-                item = self.normalize_prefix(original_item) if original_item else original_item
-                
-                # Now use the normalized item for prefix checking
+                # Normalize the item once (upper-case device ID, trailing slash for prefixes)
+                kind, item = classify_backlog_entry(original_item)
+                if kind is None:
+                    self.logger.warning(f"backlog.json: entry {original_item!r} ignored - use a device ('2F6913DB/'), a session ('2F6913DB/00000001/') or a log file key")
+                    continue
                 if original_item != item:
-                    self.logger.info(f"Using normalized prefix: {item}")
+                    self.logger.info(f"Using normalized entry: {item}")
                 
                 # Case 1 (device prefix): List all sessions and process each separately
                 if re.match(r'^[0-9A-F]{8}/$', item):

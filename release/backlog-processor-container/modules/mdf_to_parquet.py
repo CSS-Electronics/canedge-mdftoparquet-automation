@@ -11,6 +11,7 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
     
     logger.info(f"Trigger event: {event}")
     process_result = False 
+    decoder_result, parquet_files_count = False, 0
     decoder = os.environ.get("MF4_DECODER", "mdf2parquet_decode")
     log_file_object_paths = get_log_file_object_paths(cloud, event, logger)            
 
@@ -51,12 +52,12 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
             if decoder_result and parquet_files_count > 0:   
                 # If valid custom-messages.json, create custom Parquet messages 
                 logger.info(f"\n\nADD CUSTOM MESSAGES")
-                custom_messages = do.download_json_file("custom-messages.json")  
+                custom_messages = do.load_control_file("custom-messages.json")
                 ccm.create_custom_messages(custom_messages)
                 
                 # If valid events.json is found in S3 input bucket, detect events in decoded data
                 logger.info(f"\n\nDETECT EVENTS")
-                events = do.download_json_file("events.json")
+                events = do.load_control_file("events.json")
                 de.process_events(events, device_file)
 
                 # routing.json (per-customer output routing) is currently an AWS-only feature.
@@ -66,7 +67,7 @@ def mdf_to_parquet(cloud, storage_client, notification_client, event, bucket_inp
                 mirror_to_default = False
                 if cloud in ("Amazon", "Local"):
                     logger.info(f"\n\nLOAD ROUTING CONFIG")
-                    routing_config = do.download_json_file("routing.json")
+                    routing_config = do.load_control_file("routing.json")
                     routing_rule = resolve_routing_rule(device_id, routing_config, logger)
                     mirror_to_default = resolve_mirror_to_default(routing_config)
                 else:
