@@ -22,8 +22,8 @@ def run_backlog_processing():
     try:
         storage_client = boto3.client('s3')
         pb = ProcessBacklog(cloud, storage_client, input_bucket, logger)
-        pb.process_backlog_from_cloud()
-        return 0
+        success = pb.process_backlog_from_cloud()
+        return 0 if success else 1
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         return 1

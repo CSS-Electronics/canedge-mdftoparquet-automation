@@ -118,8 +118,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger, supr
                 logger.info(f"Successfully downloaded {object_path} from {bucket} to {local_path}")
             return True
         except Exception as e:
-            if logger:
-                logger.error(f"Failed to download {object_path} from {bucket}: {e}")
+            log_download_failure(logger, bucket, object_path, e, supress)
             return False
     elif cloud == "Google":
         try:
@@ -138,7 +137,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger, supr
                 logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
             return True
         except Exception as e:
-            logger.info(f"Failed to download {bucket}/{object_path}")
+            log_download_failure(logger, bucket, object_path, e, supress)
             return False
     elif cloud == "Azure":
         try:
@@ -156,7 +155,7 @@ def download_object(cloud, client, bucket, object_path, local_path, logger, supr
                 logger.info(f"Downloaded {bucket}/{object_path} to {local_path}")
             return True
         except Exception as e:
-            logger.info(f"Failed to download {bucket}/{object_path}")
+            log_download_failure(logger, bucket, object_path, e, supress)
             return False
     elif cloud == "Local":
         try:
@@ -175,12 +174,35 @@ def download_object(cloud, client, bucket, object_path, local_path, logger, supr
                 logger.info(f"Copied {object_path} from Local storage: {bucket} to {local_path}")
             return True
         except Exception as e:
-            if logger:
-                logger.error(f"Failed to copy {object_path} from local storage {bucket}: {e}")
+            log_download_failure(logger, bucket, object_path, e, supress)
             return False
     else:
         logger.error(f"Unsupported cloud provider: {cloud}")
         return False
+
+
+def is_not_found_error(e):
+    """True if a download failed because the object does not exist (same check for all clouds)."""
+    if isinstance(e, FileNotFoundError):
+        return True
+    if type(e).__name__ in ("NotFound", "ResourceNotFoundError", "NoSuchKey"):   # Google, Azure, Amazon
+        return True
+    response = getattr(e, "response", None)
+    if isinstance(response, dict):   # Amazon botocore ClientError
+        return response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound")
+    return False
+
+
+def log_download_failure(logger, bucket, object_path, e, supress=False):
+    """A missing object is INFO (e.g. an optional control file that is not used), any other failure is ERROR.
+    supress=True mutes the 'not found' line (the caller logs its own message)."""
+    if not logger:
+        return
+    if is_not_found_error(e):
+        if not supress:
+            logger.info(f"{object_path} not found in {bucket}")
+    else:
+        logger.error(f"Failed to download {object_path} from {bucket}: {e}")
 
 
 def upload_object(cloud, client, bucket, object_path, local_path, logger):

@@ -22,8 +22,8 @@ def run_backlog_processing(logger):
     try:
         storage_client = storage.Client()
         pb = ProcessBacklog(cloud, storage_client, input_bucket, logger)
-        pb.process_backlog_from_cloud()
-        return 0 
+        success = pb.process_backlog_from_cloud()
+        return 0 if success else 1
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         return 1

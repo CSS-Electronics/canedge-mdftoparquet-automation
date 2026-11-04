@@ -74,4 +74,7 @@ def process():
         return 1
 
 if __name__ == "__main__":
-    process()
+    exit_code = process()
+    if exit_code:
+        # Fail the Glue job run so its status shows FAILED (details: the job's output logs)
+        raise RuntimeError(f"Aggregation failed (exit code {exit_code}) - see the job's output logs")

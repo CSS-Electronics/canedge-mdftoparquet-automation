@@ -64,8 +64,8 @@ def run_aggregation():
             logger=logger
         )
         
-        aggregator.process_data_lake()
-        return 0
+        days_processed = aggregator.process_data_lake()
+        return 0 if days_processed is not None else 1
         
     except Exception as e:
         logger.error(f"Error running aggregation: {e}")

@@ -42,8 +42,8 @@ Contains scripts for aggregating Parquet files to trip summray level (as a suppl
 Contains utilities and scripts for local development and testing.
 
 - `run_test.py` - Main test runner for simulating cloud function invocation locally
-- `local_invocation.py` - Utility for invoking cloud functions with proper environment setup
 - `utils_testing.py` - Utility functions for creating test events and loading credentials
+- `test_control_files.py` / `test_routing_unit.py` - Unit tests (control file validation, backlog batching, routing)
 
 ### Core Modules
 Shared functionality is in the `modules/` directory at the repository root:
@@ -51,6 +51,8 @@ Shared functionality is in the `modules/` directory at the repository root:
 - `cloud_functions.py` - Cloud provider specific operations (download/upload/list files)
 - `utils.py` - Utility functions for decoding, custom messages, and event detection
 - `custom_message_functions.py` - Functions for creating calculated signals
+- `control_files.py` - Validation of the optional control files (standard library only, also usable outside the automation)
+- `routing.py` - Per-device output routing via `routing.json` (Amazon only)
 - `aggregation.py` - Functionality for aggregation of Parquet data lakes
 - `functions.py` - Additional helper functions
 
@@ -97,8 +99,22 @@ Advanced functionality for the automation integration relies on uploading specif
 - **Device-Specific DBC**: Configure device-specific DBC decoding via `dbc-groups.json`
 - **Decryption**: Decrypt `MFE`, `MFM` files via `passwords.json` 
 - **Geofences**: Configure dynamic geofence definitions via `geofences.json`
+- **Client-specific routing**: Route each device's data to a client output bucket via `routing.json` (Amazon only)
 
 The `json-examples/` folder contains examples showing the structure of the above files. Details on these topics can be found in the CANedge Intro.
+
+### Control File Errors
+
+All control files are optional: if a file is missing, the related feature is off (logged at INFO level as `<file> not found - feature off`). If a file is present but invalid, each problem is logged as `CONTROL FILE ERROR: <file>: <location>: <problem>` (problems that do not stop the processing as `CONTROL FILE WARNING`), and the processing fails so the problem is visible (e.g. via the Amazon Lambda error alarm). The same prefix is used when a control file refers to data that is not in the decoded log file, e.g. an `events.json` trigger signal that is not in the trigger message.
+
+You can validate a control file before uploading it:
+
+```python
+from modules.control_files import parse
+data, issues = parse("events.json", open("events.json", "rb").read())
+for issue in issues:
+    print(issue.level, issue)
+```
 
 ### Geofence Configuration
 
@@ -173,9 +189,11 @@ The backlog.json file must use the following format with required configuration 
 
 - **config**: Required configuration section
   - **batch_size**: Required batch size configuration
-    - **min**: Minimum items to trigger batch optimization (required)
-    - **max**: Maximum items per batch (required)
+    - **min**: Sessions with fewer log files than this are merged with other small sessions of the same device (required)
+    - **max**: Maximum log files per batch (required)
 - **files**: Required array of file paths/prefixes to process
+
+Batches never combine files from different devices. Sessions with `min` or more log files are processed as their own batch, and any batch above `max` log files is split.
 
 All configuration parameters are required - the system will validate the structure of the backlog.json file and fail if any required field is missing.
 
@@ -187,7 +205,7 @@ You can specify three types of entries in the backlog file:
 2. **Session Prefixes**: Path to a specific session (e.g., `"2F6913DB/00000088/"`) - processes all files in that session
 3. **Individual Files**: Complete file path (e.g., `"2F6913DB/00000086/00000001-62961868.MF4"`) - processes a specific file
 
-**Note**: For prefixes (device or session), trailing slashes are optional - they will be automatically added if missing. File paths should not have trailing slashes.
+**Note**: For prefixes (device or session), trailing slashes are optional - they will be automatically added if missing. Device IDs are read in upper case. File paths should not have trailing slashes. Other entries are ignored with a warning.
 
 ---------
 
@@ -259,7 +277,7 @@ The aggregations.json file defines how to identify and process trips in the Parq
     - **trip_min_length_min**: Minimum trip length in minutes to be considered valid
 
 - **device_clusters**: Group devices into logical clusters
-  - **devices**: List of device IDs (serial numbers) to process
+  - **devices**: List of device IDs (serial numbers) to process (at least one)
   - **cluster**: Name assigned to this group of devices
 
 - **cluster_details**: Processing configuration for each cluster
@@ -269,7 +287,7 @@ The aggregations.json file defines how to identify and process trips in the Parq
     - **aggregations**: List of signals to aggregate
       - **message**: Parquet data lake message folder name
       - **signal**: List of signal names to aggregate
-      - **aggregation**: List of aggregation functions (avg, max, min, sum, first, last, etc.)
+      - **aggregation**: List of aggregation functions: `min`, `max`, `avg`, `median`, `sum`, `first`, `last`, `delta_sum`, `delta_sum_pos`, `delta_sum_neg`
 
 ---------
 
