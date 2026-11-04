@@ -507,7 +507,11 @@ class DetectEvents:
             except:
                 df_signal_event_meta["Latitude"] = pd.NA
                 df_signal_event_meta["Longitude"] = pd.NA
-                                            
+        else:
+            # The event table schema always has Latitude/Longitude: keep them empty when GPS data is not included
+            df_signal_event_meta["Latitude"] = pd.NA
+            df_signal_event_meta["Longitude"] = pd.NA
+
         # Define a Parquet schema to ensure correct and consistent type mapping
         schema = pa.schema(
             [
