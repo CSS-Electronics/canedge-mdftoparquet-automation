@@ -72,8 +72,10 @@ class DownloadObjects:
         for group in data["dbc_groups"]:
             self.logger.info(f"Evaluating DBC group {group}")
             if device_id in group["devices"]:
-                device_dbc_list = group["dbc_files"]
-                self.logger.info(f"Device specific DBC files: {device_dbc_list}")
+                # Optional common_dbc_files (v4.4.0+) are added to the group's files
+                common = [f for f in data.get("common_dbc_files", []) if f not in group["dbc_files"]]
+                device_dbc_list = group["dbc_files"] + common
+                self.logger.info(f"Device specific DBC files ({len(group['dbc_files'])} group + {len(common)} common): {device_dbc_list}")
                 break
         else:
             self.logger.info(f"Device {device_id} is not in dbc-groups.json - applying all DBC files")

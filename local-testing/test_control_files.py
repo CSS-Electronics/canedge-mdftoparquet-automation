@@ -152,6 +152,41 @@ expect("3-digit channel prefix rejected", "dbc-groups.json", d, "error", "can11-
 d = copy.deepcopy(dg); d["dbc_groups"][1]["devices"].append("2F6913DB")
 expect("device in two groups -> warning", "dbc-groups.json", d, "warning", "first group wins")
 expect("missing dbc_groups", "dbc-groups.json", {"groups": []}, "error", "dbc_groups: missing")
+check_eq("example without common_dbc_files: no issues (unchanged behavior)",
+         [str(i) for i in validate("dbc-groups.json", dg)], [])
+dgc = load("dbc-groups-common.json")
+check_eq("common_dbc_files example valid", [f"{i.level}: {i}" for i in validate("dbc-groups.json", dgc)], [])
+d = copy.deepcopy(dgc); d["common_dbc_files"].append("j1939-dm01.dbc")
+expect("common DBC without channel prefix", "dbc-groups.json", d, "error", "can1-<name>.dbc")
+d = copy.deepcopy(dgc); d["common_dbc_files"] = "can1-j1939.dbc"
+expect("common_dbc_files not a list", "dbc-groups.json", d, "error", "non-empty list")
+d = copy.deepcopy(dgc); d["common_dbc_files"] = []
+expect("common_dbc_files empty", "dbc-groups.json", d, "error", "non-empty list")
+d = copy.deepcopy(dgc); d["dbc_groups"] = []
+expect("common_dbc_files without groups -> warning", "dbc-groups.json", d, "warning", "no effect")
+d = copy.deepcopy(dg); d["common_dbc_file"] = ["can1-x.dbc"]
+expect("typo in top-level key -> warning", "dbc-groups.json", d, "warning", "unknown key")
+d = copy.deepcopy(dg); d["common_dbc_file"] = ["can1-x.dbc"]
+check_eq("unknown top-level key is not an error", [str(i) for i in validate("dbc-groups.json", d) if i.level == "error"], [])
+
+print("dbc-groups.json device DBC list (get_device_dbc_list):")
+from modules.utils import DownloadObjects  # noqa: E402
+
+
+def device_dbcs(data, device):
+    do = DownloadObjects.__new__(DownloadObjects)
+    do.logger = log
+    do.load_control_file = lambda *a, **k: data
+    return do.get_device_dbc_list(device)
+
+
+check_eq("no file -> all DBCs", device_dbcs(None, "2F6913DB"), [])
+check_eq("group without common (unchanged)", device_dbcs(dg, "2F6913DB"), ["can1-typeA.dbc", "can2-mydbc2.dbc"])
+check_eq("device in no group -> all DBCs", device_dbcs(dgc, "AAAAAAAA"), [])
+got = device_dbcs(dgc, "12345678")
+check_eq("group + common", got, ["can1-typeB.dbc", "can2-mydbc2.dbc"] + dgc["common_dbc_files"])
+d = copy.deepcopy(dgc); d["common_dbc_files"].append("can2-mydbc2.dbc")
+check_eq("common file also in group -> listed once", device_dbcs(d, "12345678").count("can2-mydbc2.dbc"), 1)
 
 print("routing.json:")
 rt = load("routing.json")

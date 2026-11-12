@@ -18,7 +18,7 @@ import re
 from datetime import datetime
 from typing import NamedTuple
 
-CONTROL_FILES_VERSION = "4.3.0"
+CONTROL_FILES_VERSION = "4.4.0"
 
 CONTROL_FILES = ("events.json", "custom-messages.json", "geofences.json", "aggregations.json", "backlog.json",
                  "dbc-groups.json", "routing.json")
@@ -495,6 +495,19 @@ def _validate_dbc_groups(data, r, **_):
                 r.error(_join(path, "dbc_files"), f'"{name}" must be a bucket root DBC file named like '
                                                   "can1-<name>.dbc, can11-<name>.dbc or lin1-<name>.dbc (lower case)")
         _unknown_keys(r, group, ("devices", "dbc_files"), path)
+    # Optional (v4.4.0+): DBC files added to the files of every device that is in a group
+    if "common_dbc_files" in data:
+        common = data["common_dbc_files"]
+        if not _is_str_list(common):
+            r.error("common_dbc_files", f"must be a non-empty list of DBC file names, got {json.dumps(common)}")
+        else:
+            for name in common:
+                if not DBC_FILE_RE.match(name):
+                    r.error("common_dbc_files", f'"{name}" must be a bucket root DBC file named like '
+                                                "can1-<name>.dbc, can11-<name>.dbc or lin1-<name>.dbc (lower case)")
+            if isinstance(groups, list) and not groups:
+                r.warning("common_dbc_files", "no effect without dbc_groups (devices in no group get all DBC files)")
+    _unknown_keys(r, data, ("dbc_groups", "common_dbc_files"), "")
 
 
 # -----------------------------------------------------------

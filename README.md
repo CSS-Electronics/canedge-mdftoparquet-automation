@@ -96,7 +96,7 @@ Advanced functionality for the automation integration relies on uploading specif
 
 - **Custom Messages**: Define custom calculated signals via `custom-messages.json` 
 - **Event Detection**: Configure event detection via `events.json` 
-- **Device-Specific DBC**: Configure device-specific DBC decoding via `dbc-groups.json`
+- **Device-Specific DBC**: Configure device-specific DBC decoding via `dbc-groups.json` (optional `common_dbc_files`, v4.4.0+: DBC files added to every group, see `json-examples/dbc-groups-common.json`)
 - **Decryption**: Decrypt `MFE`, `MFM` files via `passwords.json` 
 - **Geofences**: Configure dynamic geofence definitions via `geofences.json`
 - **Client-specific routing**: Route each device's data to a client output bucket via `routing.json` (Amazon only)
