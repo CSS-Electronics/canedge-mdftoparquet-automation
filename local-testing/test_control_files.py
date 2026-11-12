@@ -144,6 +144,11 @@ d = copy.deepcopy(dg); d["dbc_groups"][0]["devices"].append("2f6913db")
 expect("lower-case device", "dbc-groups.json", d, "error", "not a device ID")
 d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"].append("CAN1-test.DBC")
 expect("DBC name not lower case", "dbc-groups.json", d, "error", "can1-<name>.dbc")
+d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"] += ["can11-router-s1.dbc", "can18-router2-s4.dbc"]
+check_eq("CANmod.router channel prefixes (can11-, can18-) valid",
+         [str(i) for i in validate("dbc-groups.json", d) if i.level == "error"], [])
+d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"].append("can111-x.dbc")
+expect("3-digit channel prefix rejected", "dbc-groups.json", d, "error", "can11-<name>.dbc")
 d = copy.deepcopy(dg); d["dbc_groups"][1]["devices"].append("2F6913DB")
 expect("device in two groups -> warning", "dbc-groups.json", d, "warning", "first group wins")
 expect("missing dbc_groups", "dbc-groups.json", {"groups": []}, "error", "dbc_groups: missing")

@@ -31,7 +31,7 @@ ROUTING_CLOUDS = ("Amazon", "Local")
 DEVICE_RE = re.compile(r"^[0-9A-F]{8}$")
 DEVICE_ANY_CASE_RE = re.compile(r"^[0-9A-Fa-f]{8}$")
 TABLE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")    # valid in Athena, BigQuery and Synapse
-DBC_FILE_RE = re.compile(r"^(can|lin)[0-9]-.+\.dbc$")
+DBC_FILE_RE = re.compile(r"^(can|lin)[0-9]{1,2}-.+\.dbc$")   # can11-, can12-, ... = CANmod.router channels
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RASTER_RE = re.compile(r"^\d+(\.\d+)?([a-zA-Z]+)$")
 RASTER_UNITS = ("ns", "us", "ms", "s", "min", "h", "D")
@@ -493,7 +493,7 @@ def _validate_dbc_groups(data, r, **_):
         for name in files or []:
             if not DBC_FILE_RE.match(name):
                 r.error(_join(path, "dbc_files"), f'"{name}" must be a bucket root DBC file named like '
-                                                  "can1-<name>.dbc or lin1-<name>.dbc (lower case)")
+                                                  "can1-<name>.dbc, can11-<name>.dbc or lin1-<name>.dbc (lower case)")
         _unknown_keys(r, group, ("devices", "dbc_files"), path)
 
 
