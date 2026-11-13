@@ -1,0 +1,29 @@
+{
+  "common_dbc_files": [
+    "dbc/can1-j1939-73-dm01_header.dbc",
+    "dbc/can1-j1939-73-dm01_dtc_01.dbc",
+    "can9-database-01.09.dbc"
+  ],
+  "dbc_groups": [
+    {
+      "devices": [
+        "2A896980",
+        "2F6913DB",
+        "18D508A1"
+      ],
+      "dbc_files": [
+        "dbc/can1-typeA.dbc",
+        "can2-mydbc2.dbc"
+      ]
+    },
+    {
+      "devices": [
+        "12345678"
+      ],
+      "dbc_files": [
+        "dbc/can1-typeB.dbc",
+        "can2-mydbc2.dbc"
+      ]
+    }
+  ]
+}

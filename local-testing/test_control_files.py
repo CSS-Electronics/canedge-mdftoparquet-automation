@@ -169,6 +169,31 @@ expect("typo in top-level key -> warning", "dbc-groups.json", d, "warning", "unk
 d = copy.deepcopy(dg); d["common_dbc_file"] = ["can1-x.dbc"]
 check_eq("unknown top-level key is not an error", [str(i) for i in validate("dbc-groups.json", d) if i.level == "error"], [])
 
+print("dbc-groups.json DBC files in a folder (v4.5.0+):")
+dgf = load("dbc-groups-folder.json")
+check_eq("folder example valid", [f"{i.level}: {i}" for i in validate("dbc-groups.json", dgf)], [])
+d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"] += ["DBC/can1-x.dbc", "my dbc files/lin1-y.dbc"]
+check_eq("folder entries (any folder name) valid", [str(i) for i in validate("dbc-groups.json", d)], [])
+for name, text in (("/dbc/can1-x.dbc", "one folder"), ("dbc//can1-x.dbc", "one folder"),
+                   ("a/b/can1-x.dbc", "one folder"), ("../can1-x.dbc", "one folder"), ("./can1-x.dbc", "one folder"),
+                   ("dbc\\can1-x.dbc", "can1-<name>.dbc"), ("dbc/j1939-x.dbc", "can1-<name>.dbc"),
+                   ("dbc/CAN1-x.dbc", "can1-<name>.dbc"), ("dbc/", "can1-<name>.dbc"),
+                   ("2F6913DB/can1-x.dbc", "device folder"), ("2f6913db/can1-x.dbc", "device folder")):
+    d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"].append(name)
+    expect(f"group entry {name!r} rejected", "dbc-groups.json", d, "error", text)
+    d = copy.deepcopy(dgc); d["common_dbc_files"].append(name)
+    expect(f"common entry {name!r} rejected", "dbc-groups.json", d, "error", text)
+d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"].append("dbc/can1-typeA.dbc")
+expect("root + folder entry with the same file name", "dbc-groups.json", d, "error", "same file name")
+d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"] += ["a/can1-x.dbc", "b/can1-x.dbc"]
+expect("two folders with the same file name", "dbc-groups.json", d, "error", "same file name")
+d = copy.deepcopy(dgc); d["dbc_groups"][1]["dbc_files"].append("dbc/can9-database-01.09.dbc")
+expect("group entry clashes with a common entry", "dbc-groups.json", d, "error", "same file name")
+d = copy.deepcopy(dgc); d["common_dbc_files"].append("can2-mydbc2.dbc")
+check_eq("same entry in group + common is not a clash", [str(i) for i in validate("dbc-groups.json", d)], [])
+d = copy.deepcopy(dg); d["dbc_groups"][0]["dbc_files"].append("can1-typeA.dbc")
+check_eq("same root entry twice is not a clash (unchanged)", [str(i) for i in validate("dbc-groups.json", d)], [])
+
 print("dbc-groups.json device DBC list (get_device_dbc_list):")
 from modules.utils import DownloadObjects  # noqa: E402
 
@@ -187,6 +212,36 @@ got = device_dbcs(dgc, "12345678")
 check_eq("group + common", got, ["can1-typeB.dbc", "can2-mydbc2.dbc"] + dgc["common_dbc_files"])
 d = copy.deepcopy(dgc); d["common_dbc_files"].append("can2-mydbc2.dbc")
 check_eq("common file also in group -> listed once", device_dbcs(d, "12345678").count("can2-mydbc2.dbc"), 1)
+
+print("DBC download (download_dbc_files, Local bucket):")
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+from modules.control_files import ControlFileError as _CFE  # noqa: E402
+
+
+def downloaded(bucket_files, device_dbc_files):
+    """Files download_dbc_files puts in the tmp folder for a Local bucket with bucket_files, or the exception."""
+    with tempfile.TemporaryDirectory() as bucket, tempfile.TemporaryDirectory() as tmp:
+        for key in bucket_files:
+            (Path(bucket) / key).parent.mkdir(parents=True, exist_ok=True)
+            (Path(bucket) / key).write_text("VERSION \"\"\n")
+        do = DownloadObjects("Local", None, bucket, Path(tmp), Path("2F6913DB/00000001/00000001.MF4"), log)
+        try:
+            ok = do.download_dbc_files(device_dbc_files)
+        except _CFE as e:
+            return type(e).__name__
+        return ok, sorted(p.name for p in Path(tmp).iterdir())
+
+
+bucket = ["can1-a.dbc", "can2-b.dbc", "dbc/can1-c.dbc", "dbc/can2-d.dbc"]
+check_eq("no group -> all root DBCs (folder DBCs not used)", downloaded(bucket, []), (True, ["can1-a.dbc", "can2-b.dbc"]))
+check_eq("root entries (unchanged)", downloaded(bucket, ["can1-a.dbc"]), (True, ["can1-a.dbc"]))
+check_eq("missing root entry is skipped (unchanged)", downloaded(bucket, ["can1-a.dbc", "can1-zz.dbc"]), (True, ["can1-a.dbc"]))
+check_eq("root + folder entries land flat", downloaded(bucket, ["can2-b.dbc", "dbc/can1-c.dbc"]),
+         (True, ["can1-c.dbc", "can2-b.dbc"]))
+check_eq("only folder entries", downloaded(bucket, ["dbc/can1-c.dbc", "dbc/can2-d.dbc"]), (True, ["can1-c.dbc", "can2-d.dbc"]))
+check_eq("missing folder entry -> control file error", downloaded(bucket, ["can1-a.dbc", "dbc/can1-zz.dbc"]),
+         "ControlFileError")
 
 print("routing.json:")
 rt = load("routing.json")

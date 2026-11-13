@@ -83,26 +83,35 @@ class DownloadObjects:
         return device_dbc_list
                         
     # -----------------------------------------------
-    # Download DBC files
+    # Download DBC files: Bucket root DBC files via a listing (device_dbc_files empty = all of them), DBC files in a
+    # folder (v4.5.0+, e.g. dbc/can1-x.dbc in dbc-groups.json) via a direct download. All land flat in tmp_input_dir.
     def download_dbc_files(self, device_dbc_files):
         dbc_files = []
         result = True
-        
+        root_files = [f for f in device_dbc_files if "/" not in f]
+        folder_files = [f for f in device_dbc_files if "/" in f]
+
         for type in ["can", "lin"]:
             try:
                 response = list_objects(self.cloud, self.storage_client, self.bucket_input, self.logger, type)
-                
+
                 # Process the standardized response format
                 for object_info in response["objects"]:
                     dbc_object_name = object_info["name"]
-                    if dbc_object_name.endswith(".dbc") and (len(device_dbc_files) == 0 or dbc_object_name in device_dbc_files):
+                    if dbc_object_name.endswith(".dbc") and (len(device_dbc_files) == 0 or dbc_object_name in root_files):
                         local_path = self.tmp_input_dir / dbc_object_name
                         download_object(self.cloud, self.storage_client, self.bucket_input, dbc_object_name, str(local_path), self.logger)
                         dbc_files.append(dbc_object_name)
             except Exception as e:
                 self.logger.error(f"Unable to list or download DBC files from {self.bucket_input}:\n {e}")
                 result = False
-        
+
+        for dbc_object_name in folder_files:
+            local_path = self.tmp_input_dir / dbc_object_name.rpartition("/")[2]
+            if not download_object(self.cloud, self.storage_client, self.bucket_input, dbc_object_name, str(local_path), self.logger):
+                raise_control_file_error("dbc-groups.json", "dbc_files", f"{dbc_object_name} not found in the input bucket", self.logger)
+            dbc_files.append(dbc_object_name)
+
         if len(dbc_files) == 0:
             self.logger.error(f"No DBC files with valid prefix in input bucket")
             result = False
